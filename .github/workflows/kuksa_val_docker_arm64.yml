@@ -5,6 +5,11 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+    paths-ignore:
+      - ".github/workflows/kuksa_databroker_build.yml"
+      - "vehicle_data_broker/**"
+      - "Cargo.*"
+      - "Cross.toml"
     
 jobs:
   build:

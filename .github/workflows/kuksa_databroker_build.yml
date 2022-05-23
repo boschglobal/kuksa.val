@@ -1,0 +1,231 @@
+# /********************************************************************************
+# * Copyright (c) 2022 Contributors to the Eclipse Foundation
+# *
+# * See the NOTICE file(s) distributed with this work for additional
+# * information regarding copyright ownership.
+# *
+# * This program and the accompanying materials are made available under the
+# * terms of the Apache License 2.0 which is available at
+# * http://www.apache.org/licenses/LICENSE-2.0
+# *
+# * SPDX-License-Identifier: Apache-2.0
+# ********************************************************************************/
+
+name: val-vehicle-data-broker-build
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/kuksa_databroker_build.yml"
+      - "vehicle_data_broker/**"
+      - "Cargo.*"
+      - "Cross.toml"
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: cargo fmt
+        working-directory: ${{github.workspace}}
+        run: cargo fmt -- --check
+      - name: cargo clippy
+        working-directory: ${{github.workspace}}
+        run: cargo clippy --all-targets -- -W warnings -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      # TODO: make this compatible with the actions-rs/install@v0.1
+      # - uses: actions/cache@v3.0.2
+      #   with:
+      #     path: |
+      #       ~/.cargo/bin/
+      #       ~/.cargo/registry/index/
+      #       ~/.cargo/registry/cache/
+      #       ~/.cargo/git/db/
+      #       target/
+      #     key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: cargo-tarpaulin
+          version: latest
+          # use-tool-cache: true
+
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: cross
+          version: latest
+          # use-tool-cache: true
+
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: cargo-strip
+          version: latest
+          # use-tool-cache: true
+
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: cargo2junit
+          version: latest
+          # use-tool-cache: true
+
+      - name: Run Tests
+        working-directory: ${{github.workspace}}
+        run: |
+          cargo test --all-targets -- -Z unstable-options --report-time --format json | cargo2junit > results.xml;
+
+      - name: Publish test results as PR comment
+        uses: EnricoMi/publish-unit-test-result-action@v1
+        if: github.event_name == 'pull_request'
+        with:
+          check_name: Test Results
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          files: results.xml
+
+      - name: Upload testing report
+        uses: actions/upload-artifact@v3
+        with:
+          name: Testing report
+          path: results.xml
+
+      - name: Run code coverage
+        run: |
+          cargo tarpaulin -o Xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage-report
+          path: cobertura.xml
+
+      - name: Publish coverage report as comment
+        uses: 5monkeys/cobertura-action@v12
+        if: github.event_name == 'pull_request'
+        with:
+          path: cobertura.xml
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          minimum_coverage: 40
+
+  build-x86_64:
+    name: Build (x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build release (stripped)
+        working-directory: ${{github.workspace}}/vehicle_data_broker
+        run: RUSTFLAGS='-C link-arg=-s' cargo build --release --bins --examples
+
+      - name: Tar files
+        shell: bash
+        working-directory: ${{github.workspace}}
+        run: |
+          tar -czvf bin_release_databroker_x86_64.tar.gz \
+          target/release/vehicle-data-cli \
+          target/release/vehicle-data-broker \
+          target/release/examples/perf_setter \
+          target/release/examples/perf_subscriber
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: bin_release_databroker_x86_64.tar.gz
+          path: ${{github.workspace}}/bin_release_databroker_x86_64.tar.gz
+          if-no-files-found: error
+
+  build-aarch64:
+    name: Build (aarch64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install build tools
+        run: cargo install cross
+
+      - name: Build release (stripped)
+        working-directory: ${{github.workspace}}/vehicle_data_broker
+        run: RUSTFLAGS='-C link-arg=-s' cross build --release --bins --examples --target aarch64-unknown-linux-gnu
+
+      - name: Tar files
+        shell: bash
+        working-directory: ${{github.workspace}}
+        run: |
+          tar -czvf bin_release_databroker_aarch64.tar.gz \
+          target/aarch64-unknown-linux-gnu/release/vehicle-data-cli \
+          target/aarch64-unknown-linux-gnu/release/vehicle-data-broker \
+          target/aarch64-unknown-linux-gnu/release/examples/perf_setter \
+          target/aarch64-unknown-linux-gnu/release/examples/perf_subscriber
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: bin_release_databroker_aarch64.tar.gz
+          path: ${{github.workspace}}/bin_release_databroker_aarch64.tar.gz
+          if-no-files-found: error
+
+  build-databroker-image:
+    name: "Build multi-arch image (databroker)"
+    runs-on: ubuntu-latest
+    needs: [build-x86_64, build-aarch64]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Retrieve build binaries
+        uses: actions/download-artifact@v3
+        with:
+          path: ${{github.workspace}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: repository-name-adjusted
+        name: Make repository name in lower case for docker upload.
+        uses: ASzc/change-string-case-action@v2
+        with:
+          string: ${{ github.repository }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: "Build databroker image"
+        id: image_build
+        uses: docker/build-push-action@v2
+        with:
+          pull: true
+          push: false
+          outputs: |
+            type=oci,dest=./databroker.tar
+          context: .
+          file: ./vehicle_data_broker/Dockerfile
+          platforms: linux/amd64, linux/arm64
+          tags: ${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{steps.repository-name-adjusted.outputs.lowercase}}
+
+      - name: Temporarily save Docker image
+        uses: actions/upload-artifact@v3
+        with:
+          name: databroker.tar
+          path: ${{github.workspace}}/databroker.tar
+          retention-days: 1
