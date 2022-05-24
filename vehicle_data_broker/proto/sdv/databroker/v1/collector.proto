@@ -18,8 +18,8 @@ import "sdv/databroker/v1/types.proto";
 package sdv.databroker.v1;
 
 service Collector {
-    // A feeder (provider) shall call this as a first step to announce its "owned" data points
-    // to the Data Broker.
+    // Register new datapoint (metadata)
+    //
     // If the registration of at least one of the passed data point fails, the overall registration
     // is rejected and the gRPC status code ABORTED is returned (to indicate the "aborted" registration).
     // The details, which data point(s) caused the failure and the reason, is passed in back in human-
@@ -31,16 +31,6 @@ service Collector {
     //  * INVALID_VALUE_TYPE - The passed ValueType is not supported
     //  * INVALID_CHANGE_TYPE - The passed ChangeType is not supported
     rpc RegisterDatapoints(RegisterDatapointsRequest) returns (RegisterDatapointsReply);
-
-    // TODO: Convert RegisterDatapointsReply into a stream in order to be able to communicate
-    //       subscription state (i.e. if there are subscribing clients)
-    // or
-    //       Use a separate function (typically immediately) called after successful
-    // registration of datapoints, e.g.:
-    //
-    // rpc GetSubscriptionStates(<list of ids>) returns (stream SubscriptionStatesReply);
-    // or
-    // rpc ProvideDatapoints(ProvideDatapointsRequest) returns (stream ProvideDatapointsReply);
 
     // Provide a set of updated datapoint values to the broker.
     // This is the unary equivalent of `StreamDatapoints` below and is better suited for cases
@@ -90,14 +80,10 @@ message RegisterDatapointsRequest {
 }
 
 message RegistrationMetadata {
-    // Name of the data point consisting of elements separated by a dot '.'
+    // Name of the data point
     // (e.g. "Vehicle.Cabin.Seat.Row1.Pos1.Position" or "Vehicle.Speed")
-    // allowing to define datapoints as a tree structure like define by
-    // COVESA VSS (https://covesa.github.io/vehicle_signal_specification/).
-    string name        = 1;
-    DataType data_type = 2;
-    // "Free text" description allowing to give additional details targeted
-    // to an app developer.
+    string name            = 1;
+    DataType data_type     = 2;
     string description     = 3;
     ChangeType change_type = 4;
 

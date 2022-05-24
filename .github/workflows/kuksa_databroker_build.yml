@@ -11,7 +11,7 @@
 # * SPDX-License-Identifier: Apache-2.0
 # ********************************************************************************/
 
-name: val-vehicle-data-broker-build
+name: kuksa_databroker_build
 
 on:
   pull_request:

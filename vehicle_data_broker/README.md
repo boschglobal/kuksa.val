@@ -15,6 +15,7 @@
     - [Build and run databroker container](#build-and-run-databroker-container)
   - [Limitations](#limitations)
   - [GRPC overview](#grpc-overview)
+  - [Data Privacy Information](#data-privacy-information)
 
 ## Intro
 
@@ -24,7 +25,7 @@ Vehicle Data Broker is a GRPC service acting as a broker of vehicle data / data 
 
 The main interface, used by clients is defined as follows (see [file](proto/sdv/databroker/v1/broker.proto) in the proto folder):
 
-```proto
+```protobuf
 service Broker {
     rpc GetDatapoints(GetDatapointsRequest) returns (GetDatapointsReply);
     rpc Subscribe(SubscribeRequest) returns (stream Notification);
@@ -35,7 +36,7 @@ service Broker {
 
 There is also a [Collector](proto/sdv/databroker/v1/collector.proto) interface which is used by data point providers to feed data into the broker.
 
-```proto
+```protobuf
 service Collector {
     rpc RegisterDatapoints(RegisterDatapointsRequest) returns (RegisterDatapointsReply);
 
@@ -47,10 +48,10 @@ service Collector {
 
 ## Relation to the COVESA Vehicle Signal Specification (VSS)
 
-The data broker is designed to support data entries and branches as defined by the [VSS](https://covesa.github.io/vehicle_signal_specification/).
+The data broker is designed to support data entries and branches as defined by [VSS](https://covesa.github.io/vehicle_signal_specification/).
 
 In order to generate metadata from a VSS specification that can be loaded by the data broker, it's possible to use the `vspec2json.py` tool
-that's available in the VSS repository. E.g.
+that's available in the [vss-tools](https://github.com/COVESA/vss-tools) repository. E.g.
 
 ```shell
 ./vss-tools/vspec2json.py -I spec -i :uuid.txt spec/VehicleSignalSpecification.vspec vss.json
@@ -66,7 +67,7 @@ The resulting vss.json can be loaded at startup my supplying the data broker wit
 
 Prerequsites:
 - [Rust](https://www.rust-lang.org/tools/install)
-- Linux os for build needed (temporary, because of the symlink: proto folder)
+- Linux
 
 ### Build all
 
@@ -112,14 +113,14 @@ Run the cli with:
 
 To get help and an overview to the offered commands, run the cli and type :
 
-```
+```shell
 client> help
 ```
 
 
 If server wasn't running at startup
 
-```
+```shell
 client> connect
 ```
 
@@ -129,13 +130,13 @@ This will enable `TAB`-completion for the available properties in the client. Ru
 
 
 Get data points by running "get"
-```
+```shell
 client> get Vehicle.ADAS.CruiseControl.Error
 -> Vehicle.ADAS.CruiseControl.Error: NotAvailable
 ```
 
 Set data points by running "set"
-```
+```shell
 client> set Vehicle.ADAS.CruiseControl.Error Nooooooo!
 -> Ok
 ```
@@ -147,7 +148,7 @@ Detailed information about the databroker rule engine can be found in [QUERY.md]
 
 You can try it out in the client using the subscribe command in the client:
 
-```
+```shell
 client> subscribe
 SELECT
   Vehicle.ADAS.ABS.Error
@@ -228,15 +229,38 @@ docker run --rm -it  -p 55555:55555/tcp databroker <command>
 - Arrays are not supported by the cli (except for displaying them)
 
 ## GRPC overview
-This implementation uses GRPC to generate the server & client skeleton and stubs used for communication / (de)serialization.
-
-HTTP/2 over TCP is used for transport with protocol buffers as the serialization format.<br>
+Vehicle data broker uses GRPC for the communication between server & clients.
 
 A GRPC service uses `.proto` files to specify the services and the data exchanged between server and client.
 From this `.proto`, code is generated for the target language (it's available for C#, C++, Dart, Go, Java, Kotlin, Node, Objective-C, PHP, Python, Ruby, Rust...)
 
-The same `.proto` file can be used to generate skelton and stubs for other transports and serialization formats as well.
+This implementation uses the default GRPC transport HTTP/2 and the default serialization format protobuf. The same `.proto` file can be used to generate server skeleton and client stubs for other transports and serialization formats as well.
 
 HTTP/2 is a binary replacement for HTTP/1.1 used for handling connections / multiplexing (channels) & and providing a standardized way to add authorization headers for authorization & TLS for encryption / authentication. It support two way streaming between client and server.
 
-Protobuf is a binary serialization format. There is a lot of tooling around GRPC / protobuf with support in Wireshark to parse what goes on the wire. ![BloomRPC](https://github.com/uw-labs/bloomrpc) can be used to interact with the service using a GUI (by providing the .proto and endpoint).
+## Data Privacy Information
+
+Your privacy is important to us.
+The following Information is to provide you with information relevant to data protection in order to be able to use the software in a data protection compliant manner.
+It is provided as an information source for your solution-specific data protection and data privacy topics.
+This is not intended to provide and should not be relied on for legal advice.
+
+### Your Role
+
+First things first: when you choose and use our software, you are most likely acting in the role of data controller, if personal related data is being processed.
+Therefore, you must ensure that the processing of personal data complies with the respective local legal requirements, e.g. when processing data within the scope of General Data Protection Regulation (GDPR) the legal requirements for a controller from the GDPR.
+
+### Where may the processing of personal related data be relevant?
+
+When using our software in combination with other software components, personal data or data categories may be collected for the purpose of developing, testing and running in-vehicle applications (Vehicle Apps).
+Possible examples are the vehicle identification number (VIN), the number plate, GPS data, video data, audio data, or other measurement data.
+You can determine which data or data categories are collected when configuring the software.
+These data are stored in volatile memory and are deleted by shutting down the system.
+You are responsible for the compliant handling of the data in accordance with the applicable local law.
+
+### What have we done to make the software data protection friendly?
+
+This section describes the measures taken to integrate the requirements of the data protection directly into the software development.
+The technical measures described below follow a "privacy by design" approach.
+
+- Deletion possibility: The software does not save data permanently since it uses only volatile memory. All collected or processed data can be deleted by rebooting the host hardware.

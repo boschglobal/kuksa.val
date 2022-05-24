@@ -1,13 +1,14 @@
 # Mapping data types
 
-This is a proposal of how to map the [data types](https://covesa.github.io/vehicle_signal_specification/rule_set/data_entry/data_types/)
-defined by [COVESA VSS](https://covesa.github.io/vehicle_signal_specification/) to the data types used by the GRPC interface of the Vehicle Data Broker (VDB).
+This is how [VSS data types](https://covesa.github.io/vehicle_signal_specification/rule_set/data_entry/data_types/)
+defined by [COVESA VSS](https://covesa.github.io/vehicle_signal_specification/) are mapped to the data types used by
+the GRPC interface of the Vehicle Data Broker (VDB).
 
 The GRPC interface uses [protobuf](https://developers.google.com/protocol-buffers/docs/proto3#scalar) to serialize the data and provides metadata to describes the data types
 
 See `enum DataType` in [databroker.proto](../proto/sdv/edge/databroker/v1/databroker.proto) for the data types and `value` in `Datapoint` for for what is actually sent on the wire.
 
-**Note:** Support for arrays and timestamps are currently not implemented (except for setting it as the data type).
+**Note:** Support for timestamps are currently not implemented (except for setting it as the data type).
 
 | VSS data type | VDB metadata (`DataType`) | serialized as `value` |
 |---------------|:--------------------------|----------------------:|
