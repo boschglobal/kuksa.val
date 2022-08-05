@@ -1,0 +1,82 @@
+// Copyright Robert Bosch GmbH, 2021. Part of the Eclipse Kuksa Project.
+//
+// All rights reserved. This configuration file is provided to you under the
+// terms and conditions of the Eclipse Distribution License v1.0 which
+// accompanies this distribution, and is available at
+// http://www.eclipse.org/org/documents/edl-v10.php
+
+syntax = "proto3";
+ 
+//I added V1 as in databroker. Is this good practice?
+package kuksa.val.v1;
+import "google/protobuf/timestamp.proto";
+
+message Value {
+    string path =  1;
+    oneof val {
+      uint32 valueUint32 = 2;
+      int32 valueInt32 = 3;
+      uint64 valueUint64 = 4;
+      int64 valueInt64 = 5;
+      bool valueBool = 6;
+      float valueFloat = 7;
+      double valueDouble = 8;
+      string valueString = 9;
+      StringArray string_array = 21;
+      BoolArray bool_array     = 22;
+      Int32Array int32_array   = 23;
+      Int64Array int64_array   = 24;
+      Uint32Array uint32_array = 25;
+      Uint64Array uint64_array = 26;
+      FloatArray float_array   = 27;
+      DoubleArray double_array = 28;
+    }
+    google.protobuf.Timestamp timestamp=10; 
+
+    //Failues can be returned on a per-value level
+    enum Failure {
+      // The data point is known, but doesn't have a valid value
+      INVALID_VALUE = 0;
+      // The data point is known, but no value is available
+      NOT_AVAILABLE = 1;
+      // Unknown datapoint
+      UNKNOWN_DATAPOINT = 2;
+      // Access denied
+      ACCESS_DENIED = 3;
+      // Unexpected internal error
+      INTERNAL_ERROR = 4;
+  }
+}
+
+
+message StringArray {
+    repeated string values = 1;
+}
+
+message BoolArray {
+    repeated bool values = 1;
+}
+
+message Int32Array {
+    repeated sint32 values = 1;
+}
+
+message Int64Array {
+    repeated sint64 values = 1;
+}
+
+message Uint32Array {
+    repeated uint32 values = 1;
+}
+
+message Uint64Array {
+    repeated uint64 values = 1;
+}
+
+message FloatArray {
+    repeated float values = 1;
+}
+
+message DoubleArray {
+    repeated double values = 1;
+}

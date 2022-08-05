@@ -1,0 +1,128 @@
+// Copyright Robert Bosch GmbH, 2022. Part of the Eclipse Kuksa Project.
+//
+// All rights reserved. This configuration file is provided to you under the
+// terms and conditions of the Eclipse Distribution License v1.0 which
+// accompanies this distribution, and is available at
+// http://www.eclipse.org/org/documents/edl-v10.php
+
+//This is a base proto file for databroker and kuksa-val-basic
+//function set
+
+
+syntax = "proto3";
+ 
+//I added V1 as in databroker. Is this good practice?
+package kuksa.val.v1;
+import "google/protobuf/timestamp.proto";
+
+import "kuksatypes.proto";
+
+
+
+option go_package = "/kuksa_grpc_proto";
+
+/*
+Not on autorization: We assume to send auth-token or auth-uuid in metadata
+Token is a JWT like the examples here https://github.com/eclipse/kuksa.val/tree/master/kuksa_certificates/jwt
+See also https://github.com/eclipse/kuksa.val/blob/master/doc/jwt.md
+Upon reception of auth-token, server shall generate an auth_id in metadata
+that the client can use instead of auth_token in subsequent calls
+*/
+
+// The connecting service definition.
+service kuksa_val {
+  // Returns a list of requested data points.
+  rpc get (GetRequest) returns (GetResponse) {}
+  rpc set (SetRequest) returns (SetResponse) {}
+  // Subscribe to a set of data points or conditional expressions
+    // using the Data Broker Query Syntax (described in QUERY.md)
+    // Do we want to have two calls? One simple one Query?
+    // Or OneOf in Request?
+    //
+    // Returns a stream of replies.
+    //
+    // InvalidArgument is returned if the request is malformed.
+    rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);}
+
+//Request a number of VSS paths. RequestType needs to support at least
+//CURRENT_VALUE, no type assumes type=CURRENT_VALUE
+message GetRequest {
+    RequestType type = 1;
+    repeated string path = 2;
+  }
+
+//Status is overall status, 200 if everthing is good, if only
+//some datapoints could be delivered we shall agree on another code
+//202? 206? Suggestions? 210?
+message GetResponse {
+    repeated Value datapoints = 1;
+    Status status = 2;
+}
+
+//Status is overall status, 200 if everthing is good, if only
+//some datapoints could be delivered we shall agree on another code
+//202? 206? Suggestions? 210?
+message SetRequest {
+  RequestType type = 1;
+  repeated Value values = 2;
+}
+
+//Sets shall have a global status only
+message SetResponse {
+  Status status = 1;
+}
+
+
+message ComplexSubscribeQuery {
+  // Subscribe to a set of data points (or expressions) described
+  // by the provided query.
+  // The query syntax is a subset of SQL and is described in more
+  // detail in the QUERY.md file.
+  string query = 1;
+}
+
+//Type empty implies CURRENT_VALUE
+
+message SimpleSubscribeQuery {
+  RequestType type = 1;
+  string path = 2;
+}
+
+message SimpleSubscribeQueryList {
+  repeated SimpleSubscribeQuery path = 1;
+}
+
+//Not sure, this is what we want, another option is limiting
+//to string and on kuksa-val side only support SELECT a,b,c
+//but does not seem so elegant doing string parsing if all you
+//want it subscribing one path
+//Also: maybe simple is only one path instead of a list?
+message SubscribeRequest {
+  oneof q {
+    ComplexSubscribeQuery query = 1;
+    SimpleSubscribeQueryList paths = 2;
+  }
+}
+
+//Do we excpect one "set" of response from one subscribe to always be returned en-block
+//I think val-server does only ever send single vavlues, but
+//databroker might want repeated values?
+message SubscribeResponse {
+  repeated Value values = 1;
+  Status status = 2;
+}
+
+
+enum RequestType {
+    UNKNOWN_TYPE = 0;
+    CURRENT_VALUE = 1;
+    TARGET_VALUE = 2;
+    METADATA = 3;
+}
+
+//Statusdescription is optional, Statusresponse shall be an HTTP-like code
+message Status {
+    uint32 statusCode = 1;
+    string statusDescription = 2;
+  }
+
