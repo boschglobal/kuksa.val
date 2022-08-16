@@ -51,6 +51,12 @@ class VssDatabase : public IVssDatabase {
               std::shared_ptr<ISubscriptionHandler> subHandle);
   ~VssDatabase();
 
+  // Supported VSS-versions, used to control features only present in certain versions
+  static const bool vss_2_0_supported = true;
+  static const bool vss_2_1_supported = true;
+  static const bool vss_2_2_supported = true;
+  static const bool vss_3_0_supported = true;
+
   //helpers
   bool pathExists(const VSSPath &path) override;
   bool pathIsWritable(const VSSPath &path) override;

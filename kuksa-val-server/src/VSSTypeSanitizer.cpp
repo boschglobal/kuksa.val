@@ -165,8 +165,23 @@ void VssDatabase::checkAndSanitizeType(jsoncons::json &meta, jsoncons::json &val
         checkBoolType(val);
     }
     else if (dt == "string") { 
+      if (meta.contains("allowed") ) {
+        if (vss_3_0_supported) {
+          checkEnumType(meta["allowed"], val);
+        }
+        else {
+          std::string msg = "Keyword allowed first supported in VSS 3.0";
+          throw genException(msg);
+        }
+      }
       if (meta.contains("enum") ) {
-        checkEnumType(meta["enum"], val);
+        if (vss_2_0_supported || vss_2_1_supported || vss_2_2_supported) {
+          checkEnumType(meta["enum"], val);
+        }
+        else {
+          std::string msg = "Keyword enum not supported from VSS 3.0 onwards";
+          throw genException(msg);
+        }
       }
     }
     else if (dt.rfind("[]") == dt.size()-2){
