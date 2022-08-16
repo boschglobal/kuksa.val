@@ -11,17 +11,21 @@ syntax = "proto3";
 package kuksa.val.types;
 import "google/protobuf/timestamp.proto";
 
+//A VSS value, where path is a VSS path in format /Some/VSS/path
+//Attribute type defaults to CURRENT_VALUE
 message Value {
   string path = 1;
+  AttributeType attribute = 2;
+
   oneof value {
-    uint32 uint32_value      = 2;
-    int32 int32_value        = 3;
-    uint64 uint64_value      = 4;
-    int64 int64_value        = 5;
-    bool bool_value          = 6;
-    float float_value        = 7;
-    double double_value      = 8;
-    string string_value      = 9;
+    uint32 uint32_value      = 3;
+    int32 int32_value        = 4;
+    uint64 uint64_value      = 5;
+    int64 int64_value        = 6;
+    bool bool_value          = 7;
+    float float_value        = 8;
+    double double_value      = 9;
+    string string_value      = 10;
     StringArray string_array = 21;
     BoolArray bool_array     = 22;
     Int32Array int32_array   = 23;
@@ -32,7 +36,28 @@ message Value {
     DoubleArray double_array = 28;
   }
 
-  google.protobuf.Timestamp timestamp = 10;
+  google.protobuf.Timestamp timestamp = 99;
+}
+
+enum AttributeType {
+  ATTRIBUTE_TYPE_CURRENT_VALUE = 0; //this is default
+  ATTRIBUTE_TYPE_TARGET_VALUE  = 1;
+  ATTRIBUTE_TYPE_METADATA      = 2;
+}
+
+
+// This is a value with an optional Status message to indicate
+// errors
+message ResponseValue {
+  Value value             = 1;
+  Status status           = 2;
+}
+
+// A VSS path in the for /Vehicle/some/path
+// If Attribute is omitted,  attribute=CURRENT_VALUE
+message AttributedPath {
+  AttributeType attribute = 1;
+  string path             = 2; 
 }
 
 message StringArray {
@@ -65,4 +90,11 @@ message FloatArray {
 
 message DoubleArray {
   repeated double values = 1;
+}
+
+
+// General status. Statusresponse shall be an HTTP-like code
+message Status {
+  uint32 status_code        = 1;
+  string status_description = 2;
 }
