@@ -40,9 +40,11 @@ message Value {
 }
 
 enum AttributeType {
-  ATTRIBUTE_TYPE_CURRENT_VALUE = 0; //this is default
-  ATTRIBUTE_TYPE_TARGET_VALUE  = 1;
-  ATTRIBUTE_TYPE_METADATA      = 2;
+  ATTRIBUTE_TYPE_CURRENT_VALUE = 0; //this is default, every implementation shall support this
+  ATTRIBUTE_TYPE_TARGET_VALUE  = 1; //this is a set point ofr an actuator
+  ATTRIBUTE_TYPE_DATATYPE      = 2; //VSS datatype of an element as string ("branch" in case of a VSS branch)
+  ATTRIBUTE_TYPE_UNIT          = 3; //VSS unit of an element as string
+  ATTRIBUTE_TYPE_CHILDREN      = 4; //Names of all direct children as string
 }
 
 
