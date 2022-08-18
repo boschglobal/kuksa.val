@@ -13,6 +13,9 @@ syntax = "proto3";
 package kuksa.val;
 
 import "kuksatypes.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+
 
 option go_package = "/kuksa_grpc_proto";
 
@@ -42,6 +45,11 @@ service VAL {
   //
   // InvalidArgument is returned if the request is malformed.
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+
+  // Shall return a string identifier that allows the client to determine with what
+  // server/server implementation/version it is talking
+  // eg. kuksa-databroker 0.5.1
+  rpc GetServerIdentification(google.protobuf.Empty) returns (google.protobuf.StringValue);
 }
 
 // Request a number of VSS paths. 
