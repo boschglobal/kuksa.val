@@ -12,7 +12,7 @@ syntax = "proto3";
 
 package kuksa.val.v1;
 
-import "kuksatypes.proto";
+import "kuksa/val/v1/types.proto";
 
 option go_package = "/kuksa_grpc_proto";
 
@@ -95,13 +95,14 @@ message SetResponse {
 }
 
 
-// A subscribe request either subscribes a simple AttributedPath
+// A subscribe request either subscribes a simple VSS Path
 // or can be given in form of an SQL query
-// Simple queries shall be supported by all implementations
+// Simple queries for CURRENT_VALUE and TARGET_VALUE
+// shall be supported as minimum by all implementations
 message SubscribeRequest {
   oneof query {
-    Datapoint simplesub = 1;
-    string                         sqlquery  = 2;
+    DataGetRequest simplesub = 1;
+    string         sqlquery  = 2;
   }
 }
 
