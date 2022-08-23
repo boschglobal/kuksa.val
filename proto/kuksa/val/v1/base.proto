@@ -75,7 +75,7 @@ message GetResponse {
 message DataSetRequest {
   string path = 1;
   repeated FieldType fields =2 ;
-  Value value = 3;
+  Datapoint datapoint = 3;
 } 
 
 // A list of datapoints to be set
