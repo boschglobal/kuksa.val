@@ -10,12 +10,9 @@
 
 syntax = "proto3";
 
-package kuksa.val;
+package kuksa.val.v1;
 
 import "kuksatypes.proto";
-import "google/protobuf/empty.proto";
-import "google/protobuf/wrappers.proto";
-
 
 option go_package = "/kuksa_grpc_proto";
 
@@ -30,16 +27,17 @@ that the client can use instead of auth_token in subsequent calls.
 
 // The connecting service definition.
 service VAL {
-  // Returns a list of requested data points.
+  //  Get data points..
   rpc Get(GetRequest) returns (GetResponse);
 
-  // Sets a list of requests
+  // Set datapoints
   rpc Set(SetRequest) returns (SetResponse);
   
-  // Subscribe to a set of data points or conditional expressions
-  // using the Data Broker Query Syntax (described in QUERY.md)
-  // Do we want to have two calls? One simple one Query?
-  // Or OneOf in Request?
+  // Subscribe to a set of data points
+   //
+   // Returns a stream of replies.
+   //
+   // InvalidArgument is returned if the request is malformed.
   //
   // Returns a stream of replies.
   //
@@ -49,34 +47,51 @@ service VAL {
   // Shall return a string identifier that allows the client to determine with what
   // server/server implementation/version it is talking
   // eg. kuksa-databroker 0.5.1
-  rpc GetServerIdentification(google.protobuf.Empty) returns (google.protobuf.StringValue);
+  rpc GetServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse);
 }
+
+// Describing which data we want
+message DataGetRequest {
+  string path = 1;
+  repeated FieldType fields =2 ;
+} 
 
 // Request a number of VSS paths. 
 message GetRequest {
-  repeated kuksa.val.types.AttributedPath datapoints = 1;
+  repeated DataGetRequest get = 1;
 }
 
 
-// Status is overall status, the datapoints may contain 
-// individual status information
+// Status is overall status, there may be  
+// individual status information, 
+// global status is mandatory
 message GetResponse {
-  repeated kuksa.val.types.ResponseValue datapoints = 1;
-  kuksa.val.types.Status status                     = 2;
+  repeated Datapoint datapoints             = 1;
+  repeated DatapointStatus datapoint_status = 2;
+  Status status                             = 3;
 }
+
+// Describing which data we want
+message DataSetRequest {
+  string path = 1;
+  repeated FieldType fields =2 ;
+  Value value = 3;
+} 
 
 // A list of datapoints to be set
 message SetRequest {
-  repeated kuksa.val.types.Value datapoints = 2;
+  repeated DataSetRequest set = 1;
 }
 
 // Usually it is fine to only return global status for set requests.
 // It is possible to return status messages for indiviudal VSS
 // paths. It is not expected that you get a ResponseValue for 
 // all set points, or that they contain any value
+// Status is overall status, the datapoints may contain 
+// individual status information
 message SetResponse {
-  kuksa.val.types.Status status = 1;
-  repeated kuksa.val.types.ResponseValue dpresponse = 2;
+  Status status = 1;
+  repeated DatapointStatus datapoint_status = 2;
 }
 
 
@@ -85,7 +100,7 @@ message SetResponse {
 // Simple queries shall be supported by all implementations
 message SubscribeRequest {
   oneof query {
-    kuksa.val.types.AttributedPath simplesub = 1;
+    Datapoint simplesub = 1;
     string                         sqlquery  = 2;
   }
 }
@@ -94,6 +109,14 @@ message SubscribeRequest {
 // a subscribed datapoint is updated. In case of complex queries 
 // SELECT a,b ... more than one datapoint might be in the notification
 message SubscribeResponse {
-  repeated kuksa.val.types.ResponseValue datapoints = 1;
+  repeated Datapoint datapoints = 1;
 }
 
+message GetServerInfoRequest {
+
+}
+
+message GetServerInfoResponse {
+  string name = 1;
+  string version = 2;
+}
