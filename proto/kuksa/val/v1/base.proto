@@ -53,7 +53,7 @@ service VAL {
 // Describing which data we want
 message DataGetRequest {
   string path = 1;
-  repeated FieldType fields =2 ;
+  View view   = 2 ;
 } 
 
 // Request a number of VSS paths. 
@@ -64,17 +64,16 @@ message GetRequest {
 
 // Status is overall status, there may be  
 // individual status information, 
-// global status is mandatory
 message GetResponse {
-  repeated Datapoint datapoints             = 1;
-  repeated DatapointStatus datapoint_status = 2;
-  Status status                             = 3;
+  repeated Datapoint datapoints    = 1;
+  repeated DatapointError errors   = 2;
+  Error error                      = 3;
 }
 
 // Describing which data we want
 message DataSetRequest {
   string path = 1;
-  repeated FieldType fields =2 ;
+  repeated Field fields =2 ;
   Datapoint datapoint = 3;
 } 
 
@@ -87,11 +86,9 @@ message SetRequest {
 // It is possible to return status messages for indiviudal VSS
 // paths. It is not expected that you get a ResponseValue for 
 // all set points, or that they contain any value
-// Status is overall status, the datapoints may contain 
-// individual status information
 message SetResponse {
-  Status status = 1;
-  repeated DatapointStatus datapoint_status = 2;
+  Error error = 1;
+  repeated DatapointError datapoint_errors = 2;
 }
 
 
@@ -100,10 +97,7 @@ message SetResponse {
 // Simple queries for CURRENT_VALUE and TARGET_VALUE
 // shall be supported as minimum by all implementations
 message SubscribeRequest {
-  oneof query {
-    DataGetRequest simplesub = 1;
-    string         sqlquery  = 2;
-  }
+  repeated DataGetRequest simplesub = 1;
 }
 
 // In case of simple queries, a list of length 1 will be returned when
