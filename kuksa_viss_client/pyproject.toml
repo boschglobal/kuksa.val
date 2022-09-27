@@ -1,6 +1,15 @@
 [build-system]
 requires = [
+    "grpcio",
+    "grpcio-tools",
     "setuptools>=42",
+    "setuptools-git-versioning",
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools-git-versioning]
+starting_version = "0.1.6"
+template = "{tag}"
+dev_template = "{tag}-{ccount}"
+dirty_template = "{tag}-{ccount}"
