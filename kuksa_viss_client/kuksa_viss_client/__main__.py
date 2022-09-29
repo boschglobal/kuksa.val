@@ -28,6 +28,7 @@ import functools, subprocess
 DEFAULT_SERVER_ADDR = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8090
 DEFAULT_SERVER_PROTOCOL = "ws"
+SUPPORTED_SERVER_PROTOCOLS = ("ws", "grpc")
 
 scriptDir= os.path.dirname(os.path.realpath(__file__))
 
@@ -162,16 +163,16 @@ class TestClient(Cmd):
     ap_updateVSSTree.add_argument("Json", help="Json tree to update VSS", completer_method=jsonfile_completer_method)
 
     # Constructor
-    def __init__(self):
-        super(TestClient, self).__init__(persistent_history_file=".vssclient_history", persistent_history_length=100)
+    def __init__(self, server_ip=None, server_port=None, server_protocol=None, insecure=False):
+        super(TestClient, self).__init__(persistent_history_file=".vssclient_history", persistent_history_length=100, allow_cli_args=False)
 
         self.prompt = "Test Client> "
         self.max_completion_items = 20
-        self.serverIP = DEFAULT_SERVER_ADDR
-        self.serverPort = DEFAULT_SERVER_PORT
-        self.serverProtocol = DEFAULT_SERVER_PROTOCOL
+        self.serverIP = server_ip or DEFAULT_SERVER_ADDR
+        self.serverPort = server_port or DEFAULT_SERVER_PORT
+        self.serverProtocol = server_protocol or DEFAULT_SERVER_PROTOCOL
         # Supported set of protocols
-        self.supportedProtocols = ["ws", "grpc"]
+        self.supportedProtocols = SUPPORTED_SERVER_PROTOCOLS
         
         self.vssTree = {}
         self.pathCompletionItems = []
@@ -185,7 +186,7 @@ class TestClient(Cmd):
         print("Default tokens directory: " + self.getDefaultTokenDir())
 
         print()
-        self.connect()
+        self.connect(insecure)
 
     @with_category(COMM_SETUP_COMMANDS)
     @with_argparser(ap_authorize)
@@ -404,7 +405,19 @@ class TestClient(Cmd):
 
 # Main Function
 def main():
-    clientApp = TestClient()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ip', help="VISS Server IP Address", default=DEFAULT_SERVER_ADDR)
+    parser.add_argument('--port', type=int, help="VISS Server Port", default=DEFAULT_SERVER_PORT)
+    parser.add_argument(
+        '--protocol',
+        help="VISS Server Communication Protocol",
+        choices=SUPPORTED_SERVER_PROTOCOLS,
+        default=DEFAULT_SERVER_PROTOCOL,
+    )
+    parser.add_argument('--insecure', default=False, action='store_true', help='Connect in insecure mode')
+    args = parser.parse_args()
+
+    clientApp = TestClient(args.ip, args.port, args.protocol, args.insecure)
     clientApp.cmdloop()
 
 if __name__=="__main__":
