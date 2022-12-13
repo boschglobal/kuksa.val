@@ -114,6 +114,6 @@ jobs:
         file: ./kuksa_databroker/Dockerfile-cli
         context: .
         push: true
-        tags: "ttl.sh/kuksa.val/kuksa-databroker-${{github.sha}}:1h"
+        tags: "ttl.sh/kuksa.val/kuksa-databrokercli-${{github.sha}}:1h"
         labels: ${{ steps.meta.outputs.labels }}
 
