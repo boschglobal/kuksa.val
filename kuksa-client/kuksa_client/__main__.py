@@ -17,15 +17,29 @@
 # SPDX-License-Identifier: Apache-2.0
 ########################################################################
 
-import argparse, json, sys
+import argparse
+import functools
+import json
 import logging.config
-from re import sub
-from typing import Dict, List
-import queue, time, os, threading
-from pygments import highlight, lexers, formatters
-from cmd2 import Cmd, with_argparser, with_category, Cmd2ArgumentParser, CompletionItem
-from cmd2.utils import CompletionError, basic_complete
-import functools, subprocess
+import os
+import pathlib
+import sys
+import threading
+import time
+
+from pygments import highlight
+from pygments import lexers
+from pygments import formatters
+from cmd2 import Cmd
+from cmd2 import CompletionItem
+from cmd2 import with_argparser
+from cmd2 import with_category
+from cmd2.utils import basic_complete
+
+import kuksa_certificates
+from kuksa_client import KuksaClientThread
+from kuksa_client import _metadata
+
 DEFAULT_SERVER_ADDR = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8090
 DEFAULT_SERVER_PROTOCOL = "ws"
@@ -33,10 +47,14 @@ SUPPORTED_SERVER_PROTOCOLS = ("ws", "grpc")
 
 scriptDir= os.path.dirname(os.path.realpath(__file__))
 
-from kuksa_client import KuksaClientThread
-from kuksa_client._metadata import *
-import kuksa_certificates
 
+def assignment_statement(arg):
+    path, value = arg.split('=', maxsplit=1)
+    return (path, value)
+
+
+# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-public-methods
 class TestClient(Cmd):
     def get_childtree(self, pathText):
         childVssTree = self.vssTree
@@ -60,12 +78,12 @@ class TestClient(Cmd):
                 break
 
         if 'children' in childVssTree:
-                childVssTree = childVssTree['children']
+            childVssTree = childVssTree['children']
         return childVssTree
 
     def path_completer(self, text, line, begidx, endidx):
         if not self.checkConnection():
-            return
+            return None
         if len(self.pathCompletionItems) == 0:
             tree = json.loads(self.getMetaData("*"))
 
@@ -98,18 +116,20 @@ class TestClient(Cmd):
                 self.pathCompletionItems.append(CompletionItem(prefix + key, nodetype+": "+ description))
 
                 if 'children' in child:
-                    self.pathCompletionItems.append(CompletionItem(prefix + key+seperator, "Children of branch "+prefix+key))
+                    self.pathCompletionItems.append(
+                        CompletionItem(prefix + key+seperator, "Children of branch "+prefix+key),
+                    )
 
         return basic_complete(text, line, begidx, endidx, self.pathCompletionItems)
 
-    def subscribeCallback(self, path, attr, resp):
-        self.subscribeFileDesc[(path,attr)].write(resp + "\n")
-        self.subscribeFileDesc[(path,attr)].flush()
+    def subscribeCallback(self, logPath, resp):
+        with logPath.open('a', encoding='utf-8') as logFile:
+            logFile.write(resp + "\n")
 
     def subscriptionIdCompleter(self, text, line, begidx, endidx):
         self.pathCompletionItems = []
-        for id in self.subscribeIdToPath.keys():
-            self.pathCompletionItems.append(CompletionItem(id))
+        for sub_id in self.subscribeIds:
+            self.pathCompletionItems.append(CompletionItem(sub_id))
         return basic_complete(text, line, begidx, endidx, self.pathCompletionItems)
 
     COMM_SETUP_COMMANDS = "Communication Set-up Commands"
@@ -123,40 +143,83 @@ class TestClient(Cmd):
     ap_authorize = argparse.ArgumentParser()
     tokenfile_completer_method = functools.partial(Cmd.path_complete,
         path_filter=lambda path: (os.path.isdir(path) or path.endswith(".token")))
-    ap_authorize.add_argument('Token', help='JWT(or the file storing the token) for authorizing the client.', completer_method=tokenfile_completer_method)
+    ap_authorize.add_argument(
+        'Token',
+        help='JWT(or the file storing the token) for authorizing the client.',
+        completer_method=tokenfile_completer_method,
+    )
     ap_setServerAddr = argparse.ArgumentParser()
     ap_setServerAddr.add_argument('IP', help='VISS/gRPC Server IP Address', default=DEFAULT_SERVER_ADDR)
     ap_setServerAddr.add_argument('Port', type=int, help='VISS/gRPC Server Port', default=DEFAULT_SERVER_PORT)
-    ap_setServerAddr.add_argument('-p', "--protocol", help='VISS/gRPC Server Communication Protocol (ws or grpc)', default=DEFAULT_SERVER_PROTOCOL)
+    ap_setServerAddr.add_argument(
+        '-p',
+        "--protocol",
+        help='VISS/gRPC Server Communication Protocol (ws or grpc)',
+        default=DEFAULT_SERVER_PROTOCOL,
+    )
 
     ap_setValue = argparse.ArgumentParser()
     ap_setValue.add_argument("Path", help="Path to be set", completer_method=path_completer)
     ap_setValue.add_argument("Value", help="Value to be set")
     ap_setValue.add_argument("-a", "--attribute", help="Attribute to be set", default="value")
 
+    ap_setValues = argparse.ArgumentParser()
+    ap_setValues.add_argument(
+        "Path=Value",
+        help="Path and new value this path is to be set with",
+        nargs='+',
+        type=assignment_statement,
+    )
+    ap_setValues.add_argument("-a", "--attribute", help="Attribute to be set", default="value")
+
     ap_getValue = argparse.ArgumentParser()
     ap_getValue.add_argument("Path", help="Path to be read", completer_method=path_completer)
     ap_getValue.add_argument("-a", "--attribute", help="Attribute to be get", default="value")
+
+    ap_getValues = argparse.ArgumentParser()
+    ap_getValues.add_argument("Path", help="Path whose value is to be read", nargs='+', completer_method=path_completer)
+    ap_getValues.add_argument("-a", "--attribute", help="Attribute to be get", default="value")
 
     ap_setTargetValue = argparse.ArgumentParser()
     ap_setTargetValue.add_argument("Path", help="Path whose target value to be set", completer_method=path_completer)
     ap_setTargetValue.add_argument("Value", help="Value to be set")
 
+    ap_setTargetValues = argparse.ArgumentParser()
+    ap_setTargetValues.add_argument(
+        "Path=Value",
+        help="Path and new target value this path is to be set with",
+        nargs='+',
+        type=assignment_statement,
+    )
+
     ap_getTargetValue = argparse.ArgumentParser()
-    ap_getTargetValue.add_argument("Path", help="Path whose target value to be read", completer_method=path_completer)
+    ap_getTargetValue.add_argument("Path", help="Path whose target value is to be read", completer_method=path_completer)
+
+    ap_getTargetValues = argparse.ArgumentParser()
+    ap_getTargetValues.add_argument("Path", help="Path whose target value is to be read", nargs='+', completer_method=path_completer)
 
     ap_subscribe = argparse.ArgumentParser()
-    ap_subscribe.add_argument("Path", help="Path to be subscribed", completer_method=path_completer)
-    ap_subscribe.add_argument("-a", "--attribute", help="Attribute to be subscribed", default="value")
+    ap_subscribe.add_argument("Path", help="Path to subscribe to", completer_method=path_completer)
+    ap_subscribe.add_argument("-a", "--attribute", help="Attribute to subscribe to", default="value")
+
+    ap_subscribeMultiple = argparse.ArgumentParser()
+    ap_subscribeMultiple.add_argument("Path", help="Path to subscribe to", nargs='+', completer_method=path_completer)
+    ap_subscribeMultiple.add_argument("-a", "--attribute", help="Attribute to subscribe to", default="value")
 
     ap_unsubscribe = argparse.ArgumentParser()
-    ap_unsubscribe.add_argument("SubscribeId", help="Corresponding subscription Id", completer_method=subscriptionIdCompleter)
+    ap_unsubscribe.add_argument(
+        "SubscribeId", help="Corresponding subscription Id", completer_method=subscriptionIdCompleter,
+    )
 
     ap_getMetaData = argparse.ArgumentParser()
     ap_getMetaData.add_argument("Path", help="Path whose metadata is to be read", completer_method=path_completer)
     ap_updateMetaData = argparse.ArgumentParser()
     ap_updateMetaData.add_argument("Path", help="Path whose MetaData is to update", completer_method=path_completer)
-    ap_updateMetaData.add_argument("Json", help="MetaData to update. Note, only attributes can be update, if update children or the whole vss tree, use `updateVSSTree` instead.")
+    ap_updateMetaData.add_argument(
+        "Json",
+        help="MetaData to update. Note, only attributes can be update, if update children or the whole vss tree, use"
+        " `updateVSSTree` instead.",
+    )
 
     ap_updateVSSTree = argparse.ArgumentParser()
     jsonfile_completer_method = functools.partial(Cmd.path_complete,
@@ -165,7 +228,9 @@ class TestClient(Cmd):
 
     # Constructor
     def __init__(self, server_ip=None, server_port=None, server_protocol=None, insecure=False):
-        super(TestClient, self).__init__(persistent_history_file=".vssclient_history", persistent_history_length=100, allow_cli_args=False)
+        super().__init__(
+            persistent_history_file=".vssclient_history", persistent_history_length=100, allow_cli_args=False,
+        )
 
         self.prompt = "Test Client> "
         self.max_completion_items = 20
@@ -175,12 +240,12 @@ class TestClient(Cmd):
         self.supportedProtocols = SUPPORTED_SERVER_PROTOCOLS
         self.vssTree = {}
         self.pathCompletionItems = []
-        self.subscribeFileDesc = {}
-        self.subscribeIdToPath = {}
+        self.subscribeIds = set()
+        self.commThread = None
 
-        print("Welcome to Kuksa Client version " + str(__version__))
+        print("Welcome to Kuksa Client version " + str(_metadata.__version__))
         print()
-        with open(os.path.join(scriptDir, 'logo'), 'r') as f:
+        with (pathlib.Path(scriptDir) / 'logo').open('r', encoding='utf-8') as f:
             print(f.read())
         print("Default tokens directory: " + self.getDefaultTokenDir())
 
@@ -205,11 +270,29 @@ class TestClient(Cmd):
         self.pathCompletionItems = []
 
     @with_category(VSS_COMMANDS)
+    @with_argparser(ap_setValues)
+    def do_setValues(self, args):
+        """Set the value of given paths"""
+        if self.checkConnection():
+            resp = self.commThread.setValues(dict(getattr(args, 'Path=Value')), args.attribute)
+            print(highlight(resp, lexers.JsonLexer(), formatters.TerminalFormatter()))
+        self.pathCompletionItems = []
+
+    @with_category(VSS_COMMANDS)
     @with_argparser(ap_setTargetValue)
     def do_setTargetValue(self, args):
-        """Set the value of a path"""
+        """Set the target value of a path"""
         if self.checkConnection():
             resp = self.commThread.setValue(args.Path, args.Value, "targetValue")
+            print(highlight(resp, lexers.JsonLexer(), formatters.TerminalFormatter()))
+        self.pathCompletionItems = []
+
+    @with_category(VSS_COMMANDS)
+    @with_argparser(ap_setTargetValues)
+    def do_setTargetValues(self, args):
+        """Set the target value of given paths"""
+        if self.checkConnection():
+            resp = self.commThread.setValues(dict(getattr(args, 'Path=Value')), "targetValue")
             print(highlight(resp, lexers.JsonLexer(), formatters.TerminalFormatter()))
         self.pathCompletionItems = []
 
@@ -223,6 +306,15 @@ class TestClient(Cmd):
         self.pathCompletionItems = []
 
     @with_category(VSS_COMMANDS)
+    @with_argparser(ap_getValues)
+    def do_getValues(self, args):
+        """Get the value of given paths"""
+        if self.checkConnection():
+            resp = self.commThread.getValues(args.Path, args.attribute)
+            print(highlight(resp, lexers.JsonLexer(), formatters.TerminalFormatter()))
+        self.pathCompletionItems = []
+
+    @with_category(VSS_COMMANDS)
     @with_argparser(ap_getTargetValue)
     def do_getTargetValue(self, args):
         """Get the value of a path"""
@@ -232,22 +324,46 @@ class TestClient(Cmd):
         self.pathCompletionItems = []
 
     @with_category(VSS_COMMANDS)
+    @with_argparser(ap_getTargetValues)
+    def do_getTargetValues(self, args):
+        """Get the value of given paths"""
+        if self.checkConnection():
+            resp = self.commThread.getValues(args.Path, "targetValue")
+            print(highlight(resp, lexers.JsonLexer(), formatters.TerminalFormatter()))
+        self.pathCompletionItems = []
+
+    @with_category(VSS_COMMANDS)
     @with_argparser(ap_subscribe)
     def do_subscribe(self, args):
         """Subscribe the value of a path"""
         if self.checkConnection():
 
-            resp = self.commThread.subscribe(args.Path, lambda msg: self.subscribeCallback(args.Path, args.attribute, msg), args.attribute)
+            logPath = pathlib.Path.cwd() / f"log_{args.Path.replace('/', '.')}_{args.attribute}_{str(time.time())}"
+            callback = functools.partial(self.subscribeCallback, logPath)
+            resp = self.commThread.subscribe(args.Path, callback, args.attribute)
             resJson =  json.loads(resp)
             if "subscriptionId" in resJson:
-                fileName = os.getcwd() + "/log_"+args.Path.replace("/", ".")+"_"+args.attribute+"_"+str(time.time())
-                self.subscribeFileDesc[(args.Path, args.attribute)] = open(fileName, "w")
-                self.subscribeIdToPath[resJson["subscriptionId"]] = (args.Path, args.attribute)
-                print("Subscription log available at " + fileName)
-                print("Execute tail -f " + fileName + " on another Terminal instance")
-                from shutil import which
-                if which("xterm") != None:
-                    subprocess.Popen(["xterm", "-e", "/bin/bash", "-l", "-c", "tail -f " + fileName])
+                self.subscribeIds.add(resJson["subscriptionId"])
+                logPath.touch()
+                print(f"Subscription log available at {logPath}")
+                print(f"Execute tail -f {logPath} on another Terminal instance")
+            print(highlight(resp, lexers.JsonLexer(), formatters.TerminalFormatter()))
+        self.pathCompletionItems = []
+
+    @with_category(VSS_COMMANDS)
+    @with_argparser(ap_subscribeMultiple)
+    def do_subscribeMultiple(self, args):
+        """Subscribe to updates of given paths"""
+        if self.checkConnection():
+            logPath = pathlib.Path.cwd() / f"subscribeMultiple_{args.attribute}_{str(time.time())}.log"
+            callback = functools.partial(self.subscribeCallback, logPath)
+            resp = self.commThread.subscribeMultiple(args.Path, callback, args.attribute)
+            resJson =  json.loads(resp)
+            if "subscriptionId" in resJson:
+                self.subscribeIds.add(resJson["subscriptionId"])
+                logPath.touch()
+                print(f"Subscription log available at {logPath}")
+                print(f"Execute tail -f {logPath} on another Terminal instance")
             print(highlight(resp, lexers.JsonLexer(), formatters.TerminalFormatter()))
         self.pathCompletionItems = []
 
@@ -258,28 +374,22 @@ class TestClient(Cmd):
         if self.checkConnection():
             resp = self.commThread.unsubscribe(args.SubscribeId)
             print(highlight(resp, lexers.JsonLexer(), formatters.TerminalFormatter()))
-            if args.SubscribeId in self.subscribeIdToPath.keys():
-                (path,attr) = self.subscribeIdToPath[args.SubscribeId]
-                if path in self.subscribeFileDesc:
-                    self.subscribeFileDesc[(path,attr)].close()
-                    del(self.subscribeFileDesc[(path,attr)])
-                del(self.subscribeIdToPath[args.SubscribeId])
+            self.subscribeIds.discard(args.SubscribeId)
             self.pathCompletionItems = []
 
     def do_quit(self, args):
         if hasattr(self, "commThread"):
-            if self.commThread != None:
+            if self.commThread is not None:
                 self.commThread.stop()
                 time.sleep(1)
-        super(TestClient, self).do_quit(args)
+        super().do_quit(args)
         sys.exit(0)
 
     def getMetaData(self, path):
         """Get MetaData of the path"""
         if self.checkConnection():
             return self.commThread.getMetaData(path)
-        else:
-            return "{}"
+        return "{}"
 
     @with_category(VSS_COMMANDS)
     @with_argparser(ap_updateVSSTree)
@@ -308,22 +418,22 @@ class TestClient(Cmd):
 
     @with_category(COMM_SETUP_COMMANDS)
     @with_argparser(ap_disconnect)
-    def do_disconnect(self, args):
+    def do_disconnect(self, _args):
         """Disconnect from the VISS/gRPC Server"""
         if hasattr(self, "commThread"):
-            if self.commThread != None:
+            if self.commThread is not None:
                 self.commThread.stop()
                 self.commThread = None
 
     def checkConnection(self):
-        if None == self.commThread or not self.commThread.checkConnection():
+        if self.commThread is None or not self.commThread.checkConnection():
             self.connect()
         return self.commThread.checkConnection()
 
     def connect(self, insecure=False):
         """Connect to the VISS/gRPC Server"""
         if hasattr(self, "commThread"):
-            if self.commThread != None:
+            if self.commThread is not None:
                 self.commThread.stop()
                 self.commThread = None
         config = {'ip':self.serverIP,
@@ -336,7 +446,7 @@ class TestClient(Cmd):
 
         waitForConnection = threading.Condition()
         waitForConnection.acquire()
-        waitForConnection.wait_for(lambda: self.commThread.checkConnection()==True, timeout=1)
+        waitForConnection.wait_for(self.commThread.checkConnection, timeout=1)
         waitForConnection.release()
 
         if self.commThread.checkConnection():
@@ -367,7 +477,7 @@ class TestClient(Cmd):
 
     @with_category(COMM_SETUP_COMMANDS)
     @with_argparser(ap_getServerAddr)
-    def do_getServerAddress(self, args):
+    def do_getServerAddress(self, _args):
         """Gets the IP Address for the VISS/gRPC Server"""
         if hasattr(self, "serverIP") and hasattr(self, "serverPort"):
             print(self.serverIP + ":" + str(self.serverPort))
@@ -377,30 +487,32 @@ class TestClient(Cmd):
     def getDefaultTokenDir(self):
         try:
             return os.path.join(kuksa_certificates.__certificate_dir__, "jwt")
-        except Exception:
+        except AttributeError:
             guessTokenDir = os.path.join(scriptDir, "../kuksa_certificates/jwt")
             if os.path.isdir(guessTokenDir):
                 return guessTokenDir
             return "Unknown"
 
     @with_category(INFO_COMMANDS)
-    def do_info(self, args):
+    def do_info(self, _args):
         """Show summary info of the client"""
-        print("kuksa-client version " + __version__)
-        print("Uri: " + __uri__)
-        print("Author: " + __author__)
-        print("Copyright: " + __copyright__)
+        print("kuksa-client version " + _metadata.__version__)
+        print("Uri: " + _metadata.__uri__)
+        print("Author: " + _metadata.__author__)
+        print("Copyright: " + _metadata.__copyright__)
         print("Default tokens directory: " + self.getDefaultTokenDir())
 
     @with_category(INFO_COMMANDS)
-    def do_version(self, args):
+    def do_version(self, _args):
         """Show version of the client"""
-        print(__version__)
+        print(_metadata.__version__)
 
     @with_category(INFO_COMMANDS)
-    def do_printTokenDir(self, args):
+    def do_printTokenDir(self, _args):
         """Show default token directory"""
         print(self.getDefaultTokenDir())
+# pylint: enable=too-many-public-methods
+# pylint: enable=too-many-instance-attributes
 
 # Main Function
 def main():
@@ -425,4 +537,3 @@ def main():
 
 if __name__=="__main__":
     sys.exit(main())
-

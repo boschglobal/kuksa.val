@@ -16,7 +16,6 @@
 # SPDX-License-Identifier: Apache-2.0
 ########################################################################
 
-import asyncio
 import contextlib
 import dataclasses
 import datetime
@@ -24,19 +23,17 @@ import enum
 import http
 import logging
 from typing import Any
-from typing import AsyncIterable
-from typing import Callable
 from typing import Collection
 from typing import Dict
 from typing import Iterable
+from typing import Iterator
 from typing import List
 from typing import Optional
 from pathlib import Path
-import uuid
 
 from google.protobuf import json_format
 import grpc
-from grpc.aio import AioRpcError
+from grpc import RpcError
 
 from kuksa.val.v1 import types_pb2
 from kuksa.val.v1 import val_pb2
@@ -125,13 +122,13 @@ class MetadataField(enum.Enum):
 
 
 class VSSClientError(Exception):
-    def __init__(self, error: Dict[str, Any], errors: Iterable[Dict[str, Any]]):
+    def __init__(self, error: Dict[str, Any], errors: List[Dict[str, Any]]):
         super().__init__(error, errors)
         self.error = error
         self.errors = errors
 
     @classmethod
-    def from_grpc_error(cls, error: AioRpcError):
+    def from_grpc_error(cls, error: RpcError):
         grpc_code, grpc_reason  = error.code().value
         # TODO: Maybe details could hold an actual Error and/or repeated DataEntryError protobuf messages.
         #       This would allow 'code' to be an actual HTTP/VISS status code not a gRPC one.
@@ -145,7 +142,7 @@ class VSSClientError(Exception):
 class ValueRestriction:
     min: Optional[Any] = None
     max: Optional[Any] = None
-    allowed_values: Optional[Any] = None
+    allowed_values: Optional[List[Any]] = None
 
 
 @dataclasses.dataclass
@@ -168,19 +165,22 @@ class Metadata:
         if message.HasField('value_restriction'):
             value_restriction = getattr(message.value_restriction, message.value_restriction.WhichOneof('type'))
             metadata.value_restriction = ValueRestriction()
-            for field in ('min', 'max', 'allowed_values'):
+            for field in ('min', 'max'):
                 if value_restriction.HasField(field):
                     setattr(metadata.value_restriction, field, getattr(value_restriction, field))
+            if value_restriction.allowed_values:
+                metadata.value_restriction.allowed_values = list(value_restriction.allowed_values)
         return metadata
 
-    def to_message(self) -> types_pb2.Metadata:
+    # pylint: disable=too-many-branches
+    def to_message(self, value_type: DataType = DataType.UNSPECIFIED) -> types_pb2.Metadata:
         message = types_pb2.Metadata(data_type=self.data_type.value, entry_type=self.entry_type.value)
         for field in ('description', 'comment', 'deprecation', 'unit'):
             field_value = getattr(self, field, None)
             if field_value is not None:
                 setattr(message, field, field_value)
         if self.value_restriction is not None:
-            if self.data_type in (
+            if value_type in (
                 DataType.INT8,
                 DataType.INT16,
                 DataType.INT32,
@@ -190,12 +190,15 @@ class Metadata:
                 DataType.INT32_ARRAY,
                 DataType.INT64_ARRAY,
             ):
-                message.value_restriction.signed.min = int(self.value_restriction.min)
-                message.value_restriction.signed.max = int(self.value_restriction.max)
-                message.value_restriction.signed.allowed_values.extend(
-                    (int(value) for value in self.value_restriction.allowed_values),
-                )
-            elif self.data_type in (
+                if self.value_restriction.min is not None:
+                    message.value_restriction.signed.min = int(self.value_restriction.min)
+                if self.value_restriction.max is not None:
+                    message.value_restriction.signed.max = int(self.value_restriction.max)
+                if self.value_restriction.allowed_values is not None:
+                    message.value_restriction.signed.allowed_values.extend(
+                        (int(value) for value in self.value_restriction.allowed_values),
+                    )
+            elif value_type in (
                 DataType.UINT8,
                 DataType.UINT16,
                 DataType.UINT32,
@@ -205,30 +208,40 @@ class Metadata:
                 DataType.UINT32_ARRAY,
                 DataType.UINT64_ARRAY,
             ):
-                message.value_restriction.unsigned.min = int(self.value_restriction.min)
-                message.value_restriction.unsigned.max = int(self.value_restriction.max)
-                message.value_restriction.unsigned.allowed_values.extend(
-                    (int(value) for value in self.value_restriction.allowed_values),
-                )
-            elif self.data_type in (
+                if self.value_restriction.min is not None:
+                    message.value_restriction.unsigned.min = int(self.value_restriction.min)
+                if self.value_restriction.max is not None:
+                    message.value_restriction.unsigned.max = int(self.value_restriction.max)
+                if self.value_restriction.allowed_values is not None:
+                    message.value_restriction.unsigned.allowed_values.extend(
+                        (int(value) for value in self.value_restriction.allowed_values),
+                    )
+            elif value_type in (
                 DataType.FLOAT,
                 DataType.DOUBLE,
                 DataType.FLOAT_ARRAY,
                 DataType.DOUBLE_ARRAY,
             ):
-                message.value_restriction.floating_point.min = float(self.value_restriction.min)
-                message.value_restriction.floating_point.max = float(self.value_restriction.max)
-                message.value_restriction.floating_point.allowed_values.extend(
-                    (float(value) for value in self.value_restriction.allowed_values),
-                )
-            elif self.data_type in (
+                if self.value_restriction.min is not None:
+                    message.value_restriction.floating_point.min = float(self.value_restriction.min)
+                if self.value_restriction.max is not None:
+                    message.value_restriction.floating_point.max = float(self.value_restriction.max)
+                if self.value_restriction.allowed_values is not None:
+                    message.value_restriction.floating_point.allowed_values.extend(
+                        (float(value) for value in self.value_restriction.allowed_values),
+                    )
+            elif value_type in (
                 DataType.STRING,
                 DataType.STRING_ARRAY,
             ):
-                message.value_restriction.string.allowed_values.extend(
-                    (str(value) for value in self.value_restriction.allowed_values),
-                )
+                if self.value_restriction.allowed_values is not None:
+                    message.value_restriction.string.allowed_values.extend(
+                        (str(value) for value in self.value_restriction.allowed_values),
+                    )
+            else:
+                raise ValueError(f"Cannot set value_restriction from data type {value_type.name}")
         return message
+    # pylint: enable=too-many-branches
 
     @classmethod
     def from_dict(cls, metadata_dict: Dict[str, Any]):
@@ -249,7 +262,7 @@ class Metadata:
                 setattr(instance, field, str(field_value))
         value_restriction = metadata_dict.get('value_restriction')
         if value_restriction is not None:
-            instance.value_restriction = {}
+            instance.value_restriction = ValueRestriction()
             for field in ('min', 'max', 'allowed_values'):
                 field_value = value_restriction.get(field)
                 if field_value is not None:
@@ -278,14 +291,19 @@ class Datapoint:
 
     @classmethod
     def from_message(cls, message: types_pb2.Datapoint):
-        return cls(value=getattr(message, message.WhichOneof('value')), timestamp=message.timestamp.ToDatetime())
+        return cls(
+            value=getattr(message, message.WhichOneof('value')),
+            timestamp=message.timestamp.ToDatetime(
+                tzinfo=datetime.timezone.utc,
+            ) if message.HasField('timestamp') else None,
+        )
 
     def to_message(self, value_type: DataType) -> types_pb2.Datapoint:
         message = types_pb2.Datapoint()
-        def set_array_attr(obj, attr, value):
+        def set_array_attr(obj, attr, values):
             array = getattr(obj, attr)
             array.Clear()
-            array.values.extend(value)
+            array.values.extend(values)
 
         def cast_array_values(cast, array):
             for item in array:
@@ -322,13 +340,16 @@ class Datapoint:
             DataType.BOOLEAN_ARRAY: ('bool_array', set_array_attr, lambda array: cast_array_values(cast_bool, array)),
             DataType.STRING_ARRAY: ('string_array', set_array_attr, lambda array: cast_array_values(str, array)),
         }.get(value_type, (None, None, None))
-        if all((field, set_field, cast_field)):
-            set_field(message, field, cast_field(self.value))
-        else:
-            # Either DataType.TIMESTAMP, DataType.TIMESTAMP_ARRAY or DataType.UNSPECIFIED...
-            raise ValueError(f"Cannot set field {field} with data type {value_type} from value {self.value}")
+        if self.value is not None:
+            if all((field, set_field, cast_field)):
+                set_field(message, field, cast_field(self.value))
+            else:
+                # Either DataType.TIMESTAMP, DataType.TIMESTAMP_ARRAY or DataType.UNSPECIFIED...
+                raise ValueError(
+                    f"Cannot determine which field to set with data type {value_type} from value {self.value}",
+                )
         if self.timestamp is not None:
-            message.value.timestamp.FromTimestamp(self.timestamp)
+            message.timestamp.FromDatetime(self.timestamp)
         return message
 
     def to_dict(self) -> Dict[str, Any]:
@@ -347,7 +368,7 @@ class DataEntry:
     actuator_target: Optional[Datapoint] = None
     metadata: Optional[Metadata] = None
 
-    value_type: Optional[DataType] = None  # Useful for serialisation, won't appear directly in serialised object
+    value_type: DataType = DataType.UNSPECIFIED  # Useful for serialisation, won't appear directly in serialised object
 
     @classmethod
     def from_message(cls, message: types_pb2.DataEntry):
@@ -367,7 +388,7 @@ class DataEntry:
         if self.actuator_target is not None:
             message.actuator_target.MergeFrom(self.actuator_target.to_message(self.value_type))
         if self.metadata is not None:
-            message.metadata.MergeFrom(self.metadata.to_message())
+            message.metadata.MergeFrom(self.metadata.to_message(self.value_type))
         return message
 
     def to_dict(self) -> Dict[str, Any]:
@@ -426,7 +447,7 @@ class ServerInfo:
         return cls(name=message.name, version=message.version)
 
 
-class VSSClient:
+class BaseVSSClient:
     def __init__(
         self,
         host: str,
@@ -442,154 +463,17 @@ class VSSClient:
         self.private_key = private_key
         self.certificate_chain = certificate_chain
         self.ensure_startup_connection = ensure_startup_connection
-        self.channel = None
         self.client_stub = None
-        self.exit_stack = contextlib.AsyncExitStack()
-        self.subscribers = {}
 
-    async def __aenter__(self):
+    def _load_creds(self) -> Optional[grpc.ChannelCredentials]:
         if all((self.root_certificates, self.private_key, self.certificate_chain)):
             root_certificates = self.root_certificates.read_bytes()
             private_key = self.private_key.read_bytes()
             certificate_chain = self.certificate_chain.read_bytes()
-            creds = grpc.ssl_channel_credentials(root_certificates, private_key, certificate_chain)
-            channel = grpc.aio.secure_channel(self.target_host, creds)
-        else:
-            channel = grpc.aio.insecure_channel(self.target_host)
-        self.channel = await self.exit_stack.enter_async_context(channel)
-        self.client_stub = val_pb2_grpc.VALStub(self.channel)
-        if self.ensure_startup_connection:
-            logger.debug("Connected to server: %s", await self.get_server_info())
-        return self
+            return grpc.ssl_channel_credentials(root_certificates, private_key, certificate_chain)
+        return None
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.exit_stack.aclose()
-        self.client_stub = None
-        self.channel = None
-
-    async def get_current_values(self, paths: Iterable[str]) -> Dict[str, Datapoint]:
-        """
-        Example:
-            current_values = await client.get_current_values([
-                'Vehicle.Speed',
-                'Vehicle.ADAS.ABS.IsActive',
-            ])
-            speed_value = current_values['Vehicle.Speed'].value
-        """
-        entries = await self.get(entries=(EntryRequest(path, View.CURRENT_VALUE, (Field.VALUE,)) for path in paths))
-        return {entry.path: entry.value for entry in entries}
-
-    async def get_target_values(self, paths: Iterable[str]) -> Dict[str, Datapoint]:
-        """
-        Example:
-            target_values = await client.get_target_values([
-                'Vehicle.ADAS.ABS.IsActive',
-            ])
-            is_abs_to_become_active = target_values['Vehicle.ADAS.ABS.IsActive'].value
-        """
-        entries = await self.get(entries=(
-            EntryRequest(path, View.TARGET_VALUE, (Field.ACTUATOR_TARGET,),
-        ) for path in paths))
-        return {entry.path: entry.actuator_target for entry in entries}
-
-    async def get_metadata(self, paths: Iterable[str], field: MetadataField = MetadataField.ALL) -> Dict[str, Metadata]:
-        """
-        Example:
-            metadata = await client.get_metadata([
-                'Vehicle.Speed',
-                'Vehicle.ADAS.ABS.IsActive',
-            ], MetadataField.UNIT)
-            speed_unit = metadata['Vehicle.Speed'].unit
-        """
-        entries = await self.get(entries=(EntryRequest(path, View.METADATA, (field,)) for path in paths))
-        return {entry.path: entry.metadata for entry in entries}
-
-    async def set_current_values(self, updates: Dict[str, Datapoint]) -> None:
-        """
-        Example:
-            await client.set_current_values({
-                'Vehicle.Speed': Datapoint(42),
-                'Vehicle.ADAS.ABS.IsActive': Datapoint(False),
-            })
-        """
-        await self.set(updates=[EntryUpdate(DataEntry(path, value=dp), (Field.VALUE,)) for path, dp in updates.items()])
-
-    async def set_target_values(self, updates: Dict[str, Datapoint]) -> None:
-        """
-        Example:
-            await client.set_target_values({'Vehicle.ADAS.ABS.IsActive': Datapoint(True)})
-        """
-        await self.set(updates=[EntryUpdate(
-            DataEntry(path, actuator_target=dp), (Field.ACTUATOR_TARGET,),
-        ) for path, dp in updates.items()])
-
-    async def set_metadata(self, updates: Dict[str, Metadata], field: MetadataField = MetadataField.ALL) -> None:
-        """
-        Example:
-            await client.set_metadata({
-                'Vehicle.Cabin.Door.Row1.Left.Shade.Position': Metadata(data_type=DataType.FLOAT),
-            })
-        """
-        await self.set(updates=[EntryUpdate(DataEntry(path, metadata=md), (field,)) for path, md in updates.items()])
-
-    async def subscribe_current_values(
-        self, paths: Iterable[str], callback: Callable[[Dict[str, Datapoint]], None],
-    ) -> uuid.UUID:
-        """
-        Example:
-            def on_current_values_updated(updates: Dict[str, Datapoint]):
-                for path, dp in updates.items():
-                    print(f"Current value for {path} is now: {dp.value}")
-
-            subscription_id = await client.subscribe_current_values([
-                'Vehicle.Speed', 'Vehicle.ADAS.ABS.IsActive',
-            ], on_current_values_updated)
-        """
-        return await self.subscribe(
-            entries=(SubscribeEntry(path, View.CURRENT_VALUE, (Field.VALUE,)) for path in paths),
-            callback=self._subscriber_current_values_callback_wrapper(callback),
-        )
-
-    async def subscribe_target_values(
-        self, paths: Iterable[str], callback: Callable[[Dict[str, Datapoint]], None],
-    ) -> uuid.UUID:
-        """
-        Example:
-            def on_target_values_updated(updates: Dict[str, Datapoint]):
-                for path, dp in updates.items():
-                    print(f"Target value for {path} is now: {dp.value}")
-
-            subscription_id = await client.subscribe_target_values([
-                'Vehicle.ADAS.ABS.IsActive',
-            ], on_target_values_updated)
-        """
-        return await self.subscribe(
-            entries=(SubscribeEntry(path, View.TARGET_VALUE, (Field.ACTUATOR_TARGET,)) for path in paths),
-            callback=self._subscriber_target_values_callback_wrapper(callback),
-        )
-
-    async def subscribe_metadata(
-        self, paths: Iterable[str],
-        callback: Callable[[Dict[str, Metadata]], None],
-        field: MetadataField = MetadataField.ALL,
-    ) -> uuid.UUID:
-        """
-        Example:
-            def on_metadata_updated(updates: Dict[str, Metadata]):
-                for path, md in updates.items():
-                    print(f"Metadata for {path} are now: {md.to_dict()}")
-
-            subscription_id = await client.subscribe_metadata([
-                'Vehicle.Speed',
-                'Vehicle.ADAS.ABS.IsActive',
-            ], on_metadata_updated)
-        """
-        return await self.subscribe(
-            entries=(SubscribeEntry(path, View.METADATA, (field,)) for path in paths),
-            callback=self._subscriber_metadata_callback_wrapper(callback),
-        )
-
-    async def get(self, *, entries: Iterable[EntryRequest]) -> List[DataEntry]:
+    def _prepare_get_request(self, entries: Iterable[EntryRequest]) -> val_pb2.GetRequest:
         req = val_pb2.GetRequest(entries=[])
         for entry in entries:
             entry_request = val_pb2.EntryRequest(path=entry.path, view=entry.view.value, fields=[])
@@ -597,48 +481,49 @@ class VSSClient:
                 entry_request.fields.append(field.value)
             req.entries.append(entry_request)
         logger.debug("%s: %s", type(req).__name__, req)
-        try:
-            resp = await self.client_stub.Get(req)
-        except AioRpcError as exc:
-            raise VSSClientError.from_grpc_error(exc) from exc
-        logger.debug("%s: %s", type(resp).__name__, resp)
-        self.raise_if_invalid(resp)
-        return [DataEntry.from_message(entry) for entry in resp.entries]
+        return req
 
-    async def set(self, *, updates: Collection[EntryUpdate]) -> None:
-        req = val_pb2.SetRequest(updates=[])
-        value_types = {}
-        paths_without_type = []
+    def _process_get_response(self, response: val_pb2.GetResponse) -> List[DataEntry]:
+        logger.debug("%s: %s", type(response).__name__, response)
+        self._raise_if_invalid(response)
+        return [DataEntry.from_message(entry) for entry in response.entries]
+
+    def _get_paths_with_required_type(self, updates: Collection[EntryUpdate]) -> Dict[str, DataType]:
+        paths_with_required_type = {}
         for update in updates:
-            # We need a data type in order to set sensor/actuator value
-            if Field.ACTUATOR_TARGET in update.fields or Field.VALUE in update.fields:
-                metadata = update.entry.metadata
+            metadata = update.entry.metadata
+            # We need a data type in order to set sensor/actuator value or metadata's value restriction
+            if (
+                Field.ACTUATOR_TARGET in update.fields or
+                Field.VALUE in update.fields or
+                (metadata is not None and metadata.value_restriction is not None)
+            ):
                 # If the update holds a new data type, we assume it will be applied before
                 # setting the sensor/actuator value.
-                if metadata is None or metadata.data_type is DataType.UNSPECIFIED:
-                    paths_without_type.append(update.entry.path)
-                else:
-                    value_types[update.entry.path] = metadata.data_type
-        value_types.update(await self.get_value_types(paths_without_type))
+                paths_with_required_type[update.entry.path] = (
+                    metadata.data_type if metadata is not None else DataType.UNSPECIFIED
+                )
+        return paths_with_required_type
+
+    def _prepare_set_request(
+        self, updates: Collection[EntryUpdate], paths_with_required_type: Dict[str, DataType],
+    ) -> val_pb2.SetRequest:
+        req = val_pb2.SetRequest(updates=[])
         for update in updates:
-            if Field.ACTUATOR_TARGET in update.fields or Field.VALUE in update.fields:
-                update.entry.value_type = value_types[update.entry.path]
+            value_type = paths_with_required_type.get(update.entry.path)
+            if value_type is not None:
+                update.entry.value_type = value_type
             req.updates.append(update.to_message())
         logger.debug("%s: %s", type(req).__name__, req)
-        try:
-            resp = await self.client_stub.Set(req)
-        except AioRpcError as exc:
-            raise VSSClientError.from_grpc_error(exc) from exc
-        logger.debug("%s: %s", type(resp).__name__, resp)
-        self.raise_if_invalid(resp)
+        return req
 
-    async def authorize(self, *, token: str) -> str:
-        raise NotImplementedError('"authorize" is not yet implemented')
+    def _process_set_response(self, response: val_pb2.SetResponse) -> None:
+        logger.debug("%s: %s", type(response).__name__, response)
+        self._raise_if_invalid(response)
 
-    async def subscribe(self, *,
-        entries: Iterable[SubscribeEntry],
-        callback: Callable[[Iterable[EntryUpdate]], None],
-    ) -> uuid.UUID:
+    def _prepare_subscribe_request(
+        self, entries: Iterable[SubscribeEntry],
+    ) -> val_pb2.SubscribeRequest:
         req = val_pb2.SubscribeRequest()
         for entry in entries:
             entry_request = val_pb2.SubscribeEntry(path=entry.path, view=entry.view.value, fields=[])
@@ -646,91 +531,275 @@ class VSSClient:
                 entry_request.fields.append(field.value)
             req.entries.append(entry_request)
         logger.debug("%s: %s", type(req).__name__, req)
-        resp_stream = self.client_stub.Subscribe(req)
+        return req
+
+    def _raise_if_invalid(self, response):
+        if response.HasField('error'):
+            error = json_format.MessageToDict(response.error, preserving_proto_field_name=True)
+        else:
+            error = {}
+        if response.errors:
+            errors = [json_format.MessageToDict(err, preserving_proto_field_name=True) for err in response.errors]
+        else:
+            errors = []
+        if (error and error['code'] != http.HTTPStatus.OK) or any(
+            sub_error['error']['code'] != http.HTTPStatus.OK for sub_error in errors
+        ):
+            raise VSSClientError(error, errors)
+
+
+class VSSClient(BaseVSSClient):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.channel = None
+        self.exit_stack = contextlib.ExitStack()
+
+    def __enter__(self):
+        creds = self._load_creds()
+        if creds is not None:
+            channel = grpc.secure_channel(self.target_host, creds)
+        else:
+            channel = grpc.insecure_channel(self.target_host)
+        self.channel = self.exit_stack.enter_context(channel)
+        self.client_stub = val_pb2_grpc.VALStub(self.channel)
+        if self.ensure_startup_connection:
+            logger.debug("Connected to server: %s", self.get_server_info())
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.exit_stack.close()
+        self.client_stub = None
+        self.channel = None
+
+    def get_current_values(self, paths: Iterable[str], **rpc_kwargs) -> Dict[str, Datapoint]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            current_values = client.get_current_values([
+                'Vehicle.Speed',
+                'Vehicle.ADAS.ABS.IsActive',
+            ])
+            speed_value = current_values['Vehicle.Speed'].value
+        """
+        entries = self.get(
+            entries=(EntryRequest(path, View.CURRENT_VALUE, (Field.VALUE,)) for path in paths), **rpc_kwargs,
+        )
+        return {entry.path: entry.value for entry in entries}
+
+    def get_target_values(self, paths: Iterable[str], **rpc_kwargs) -> Dict[str, Datapoint]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            target_values = client.get_target_values([
+                'Vehicle.ADAS.ABS.IsActive',
+            ])
+            is_abs_to_become_active = target_values['Vehicle.ADAS.ABS.IsActive'].value
+        """
+        entries = self.get(entries=(
+            EntryRequest(path, View.TARGET_VALUE, (Field.ACTUATOR_TARGET,),
+        ) for path in paths), **rpc_kwargs)
+        return {entry.path: entry.actuator_target for entry in entries}
+
+    def get_metadata(
+        self, paths: Iterable[str], field: MetadataField = MetadataField.ALL, **rpc_kwargs,
+    ) -> Dict[str, Metadata]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            metadata = client.get_metadata([
+                'Vehicle.Speed',
+                'Vehicle.ADAS.ABS.IsActive',
+            ], MetadataField.UNIT)
+            speed_unit = metadata['Vehicle.Speed'].unit
+        """
+        entries = self.get(
+            entries=(EntryRequest(path, View.METADATA, (Field(field.value),)) for path in paths), **rpc_kwargs,
+        )
+        return {entry.path: entry.metadata for entry in entries}
+
+    def set_current_values(self, updates: Dict[str, Datapoint], **rpc_kwargs) -> None:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            client.set_current_values({
+                'Vehicle.Speed': Datapoint(42),
+                'Vehicle.ADAS.ABS.IsActive': Datapoint(False),
+            })
+        """
+        self.set(
+            updates=[EntryUpdate(DataEntry(path, value=dp), (Field.VALUE,)) for path, dp in updates.items()],
+            **rpc_kwargs,
+        )
+
+    def set_target_values(self, updates: Dict[str, Datapoint], **rpc_kwargs) -> None:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            client.set_target_values({'Vehicle.ADAS.ABS.IsActive': Datapoint(True)})
+        """
+        self.set(updates=[EntryUpdate(
+            DataEntry(path, actuator_target=dp), (Field.ACTUATOR_TARGET,),
+        ) for path, dp in updates.items()], **rpc_kwargs)
+
+    def set_metadata(
+        self, updates: Dict[str, Metadata], field: MetadataField = MetadataField.ALL, **rpc_kwargs,
+    ) -> None:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            client.set_metadata({
+                'Vehicle.Cabin.Door.Row1.Left.Shade.Position': Metadata(data_type=DataType.FLOAT),
+            })
+        """
+        self.set(updates=[EntryUpdate(
+            DataEntry(path, metadata=md), (Field(field.value),),
+        ) for path, md in updates.items()], **rpc_kwargs)
+
+    def subscribe_current_values(self, paths: Iterable[str], **rpc_kwargs) -> Iterator[Dict[str, Datapoint]]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            for updates in client.subscribe_current_values([
+                'Vehicle.Speed', 'Vehicle.ADAS.ABS.IsActive',
+            ]):
+                for path, dp in updates.items():
+                    print(f"Current value for {path} is now: {dp.value}")
+        """
+        for updates in self.subscribe(
+            entries=(SubscribeEntry(path, View.CURRENT_VALUE, (Field.VALUE,)) for path in paths),
+            **rpc_kwargs,
+        ):
+            yield {update.entry.path: update.entry.value for update in updates}
+
+    def subscribe_target_values(self, paths: Iterable[str], **rpc_kwargs) -> Iterator[Dict[str, Datapoint]]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            async for updates in client.subscribe_target_values([
+                'Vehicle.ADAS.ABS.IsActive',
+            ]):
+                for path, dp in updates.items():
+                    print(f"Target value for {path} is now: {dp.value}")
+        """
+        for updates in self.subscribe(
+            entries=(SubscribeEntry(path, View.TARGET_VALUE, (Field.ACTUATOR_TARGET,)) for path in paths),
+            **rpc_kwargs,
+        ):
+            yield {update.entry.path: update.entry.actuator_target for update in updates}
+
+    def subscribe_metadata(
+        self, paths: Iterable[str],
+        field: MetadataField = MetadataField.ALL,
+        **rpc_kwargs,
+    ) -> Iterator[Dict[str, Metadata]]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        Example:
+            for updates in client.subscribe_metadata([
+                'Vehicle.Speed',
+                'Vehicle.ADAS.ABS.IsActive',
+            ]):
+                for path, md in updates.items():
+                    print(f"Metadata for {path} are now: {md.to_dict()}")
+        """
+        for updates in self.subscribe(
+            entries=(SubscribeEntry(path, View.METADATA, (Field(field.value),)) for path in paths),
+            **rpc_kwargs,
+        ):
+            yield {update.entry.path: update.entry.metadata for update in updates}
+
+
+    def get(self, *, entries: Iterable[EntryRequest], **rpc_kwargs) -> List[DataEntry]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        """
+        req = self._prepare_get_request(entries)
         try:
-            # We expect the first SubscribeResponse to be immediately available and to only hold a status
-            resp = await resp_stream.__aiter__().__anext__()
-            logger.debug("%s: %s", type(resp).__name__, resp)
-        except AioRpcError as exc:
+            resp = self.client_stub.Get(req, **rpc_kwargs)
+        except RpcError as exc:
+            raise VSSClientError.from_grpc_error(exc) from exc
+        return self._process_get_response(resp)
+
+    def set(self, *, updates: Collection[EntryUpdate], **rpc_kwargs) -> None:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        """
+        paths_with_required_type = self._get_paths_with_required_type(updates)
+        paths_without_type = [
+            path for path, data_type in paths_with_required_type.items() if data_type is DataType.UNSPECIFIED
+        ]
+        paths_with_required_type.update(self.get_value_types(paths_without_type, **rpc_kwargs))
+        req = self._prepare_set_request(updates, paths_with_required_type)
+        try:
+            resp = self.client_stub.Set(req, **rpc_kwargs)
+        except RpcError as exc:
+            raise VSSClientError.from_grpc_error(exc) from exc
+        self._process_set_response(resp)
+
+    def subscribe(self, *, entries: Iterable[SubscribeEntry], **rpc_kwargs) -> Iterator[List[EntryUpdate]]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        """
+        req = self._prepare_subscribe_request(entries)
+        resp_stream = self.client_stub.Subscribe(req, **rpc_kwargs)
+        try:
+            for resp in resp_stream:
+                logger.debug("%s: %s", type(resp).__name__, resp)
+                yield [EntryUpdate.from_message(update) for update in resp.updates]
+        except RpcError as exc:
             raise VSSClientError.from_grpc_error(exc) from exc
 
-        sub_id = uuid.uuid4()
-        new_sub_task = asyncio.create_task(self._subscriber_loop(message_stream=resp_stream, callback=callback))
-        self.subscribers[sub_id] = new_sub_task
-        return sub_id
-
-    async def unsubscribe(self, subscription_id: uuid.UUID):
-        try:
-            subscriber_task = self.subscribers.pop(subscription_id)
-        except KeyError as exc:
-            raise ValueError(f"Could not find subscription {str(subscription_id)}") from exc
-        subscriber_task.cancel()
-        try:
-            await subscriber_task
-        except asyncio.CancelledError:
-            pass
-
-    async def get_server_info(self) -> ServerInfo:
+    def get_server_info(self, **rpc_kwargs) -> ServerInfo:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        """
         req = val_pb2.GetServerInfoRequest()
         logger.debug("%s: %s", type(req).__name__, req)
         try:
-            resp = await self.client_stub.GetServerInfo(req)
-        except AioRpcError as exc:
+            resp = self.client_stub.GetServerInfo(req, **rpc_kwargs)
+        except RpcError as exc:
             raise VSSClientError.from_grpc_error(exc) from exc
         logger.debug("%s: %s", type(resp).__name__, resp)
 
         return ServerInfo.from_message(resp)
 
-    async def _subscriber_loop(
-        self,
-        *,
-        message_stream: AsyncIterable[val_pb2.SubscribeResponse],
-        callback: Callable[[Iterable[EntryUpdate]], None],
-    ):
-        async for resp in message_stream:
-            callback(EntryUpdate.from_message(update) for update in resp.updates)
-
-    @staticmethod
-    def _subscriber_current_values_callback_wrapper(
-        callback: Callable[[Dict[str, Datapoint]], None],
-    ) -> Callable[[Iterable[EntryUpdate]], None]:
-        def wrapper(updates: Iterable[EntryUpdate]) -> None:
-            callback({update.entry.path: update.entry.value for update in updates})
-        return wrapper
-
-    @staticmethod
-    def _subscriber_target_values_callback_wrapper(
-        callback: Callable[[Dict[str, Datapoint]], None],
-    ) -> Callable[[Iterable[EntryUpdate]], None]:
-        def wrapper(updates: Iterable[EntryUpdate]) -> None:
-            callback({update.entry.path: update.entry.actuator_target for update in updates})
-        return wrapper
-
-    @staticmethod
-    def _subscriber_metadata_callback_wrapper(
-        callback: Callable[[Dict[str, Metadata]], None],
-    ) -> Callable[[Iterable[EntryUpdate]], None]:
-        def wrapper(updates: Iterable[EntryUpdate]) -> None:
-            callback({update.entry.path: update.entry.metadata for update in updates})
-        return wrapper
-
-    def raise_if_invalid(self, response):
-        if response.HasField('error'):
-            error = json_format.MessageToDict(response.error, preserving_proto_field_name=True)
-        else:
-            error = None
-        if response.errors:
-            errors = [json_format.MessageToDict(err, preserving_proto_field_name=True) for err in response.errors]
-        else:
-            errors = []
-        if error and error['code'] != http.HTTPStatus.OK:
-            raise VSSClientError(error, errors)
-
-    async def get_value_types(self, paths: Iterable[str]) -> Dict[str, DataType]:
+    def get_value_types(self, paths: Collection[str], **rpc_kwargs) -> Dict[str, DataType]:
+        """
+        Parameters:
+            rpc_kwargs
+                grpc.*MultiCallable kwargs e.g. timeout, metadata, credentials.
+        req = self._prepare_get_request(entries)
+        """
         if paths:
             entry_requests = (EntryRequest(
                 path=path, view=View.METADATA, fields=(Field.METADATA_DATA_TYPE,),
             ) for path in paths)
-            entries = await self.get(entries=entry_requests)
+            entries = self.get(entries=entry_requests, **rpc_kwargs)
             return {entry.path: DataType(entry.metadata.data_type) for entry in entries}
         return {}

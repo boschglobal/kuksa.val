@@ -6,9 +6,12 @@ More about `kuksa.val` can be found in the [repository](https://github.com/eclip
 
 ## Introduction
 
-`kuksa-client` is a command-line test client which can be used to interact with the [KUKSA val server](https://github.com/eclipse/kuksa.val/tree/0.2.5/kuksa-val-server)
+`kuksa-client` provides both a command-line interface (CLI) and a standalone library to interact with either
+[KUKSA.val server](https://github.com/eclipse/kuksa.val/tree/master/kuksa-val-server) or
+[KUKSA databroker](https://github.com/eclipse/kuksa.val/tree/master/kuksa_databroker).
 
-## Installing and Starting the client
+
+## Installing the client and starting its CLI
 
 The fastest way to start using the kuksa-client is to install a pre-built version with pip.
 Instructions on how to build and run locally can be found further down in this document.
@@ -18,7 +21,7 @@ $ pip install kuksa-client
 ```
 
 
-After you have installed the kuksa-client package via pip you can run the test client directly by executing
+After you have installed the kuksa-client package via pip you can run the test client CLI directly by executing:
 
 ```console
 $ kuksa-client
@@ -149,6 +152,11 @@ Now in order to ensure local `*.py` files will be used when running the client, 
 (kuksa-client) $ pip install --editable .
 ```
 
+If you wish to also install test dependencies, run instead:
+```console
+(kuksa-client) $ pip install --editable ".[test]"
+```
+
 Now you should be able to start using `kuksa-client`:
 ```console
 (kuksa-client) $ kuksa-client --help
@@ -179,74 +187,38 @@ Notes:
 - `--rm` ensures we do not keep the docker container lying around after closing kuksa-client and `--net=host` makes sure you can reach locally running kuksa.val-server or kuksa-val docker with port forwarding on the host using the default `127.0.0.1` address.
 - CLI arguments that follow image name (e.g. `kuksa-client:latest`) will be passed through to kuksa-client entry point (e.g. `--help`).
 
+## Running test suite & quality checks
 
-## Python SDK
+This project uses pytest as its test framework and pylint as its linter.
+To run the test suite:
 
-If you would like to develop your own `kuksa.val` client,
-you can use the python sdk to interact with the `kuksa.val` server in a very easy way.
+```console
+$ pytest
+```
+
+To run the linter:
+```console
+$ pylint kuksa_client
+```
+
+## Python library
+
+`kuksa-client` also provides a library to allow you to develop your own application that interacts with either
+`kuksa-val-server` or `kuksa_databroker`.
 
 
 ### Usage
 
-Import the sdk
+Import library's main package.
 ```python
 >>> import kuksa_client
 >>> kuksa_client.__version__
 '<your version, e.g. 0.1.7>'
 ```
 
-Setup a thread to connect with the `kuksa.val` server.
-The following properties for the connection can be configured:
-- `ip` default: "127.0.0.1"
-- `port` default: 8090
-- `insecure` default: `False`
-- `cacertificate` default: "../kuksa_certificates/CA.pem"
-- `certificate` default: "../kuksa_certificates/Client.pem"
-- `key` default: "../kuksa_certificates/Client.key"
+This package holds different APIs depending on your application's requirements.
+For more information, see ([Documentation](https://github.com/eclipse/kuksa.val/blob/master/kuksa-client/docs/main.md)).
 
-```python
->>> config = {}
->>> client = kuksa_client.KuksaClientThread(config)
->>>
->>> # Start the client thread to connect with configured server
->>> client.start()
->>>
->>> # Close the connection and stop the client thread
->>> client.stop()
-```
-
-You have the following methods to interact with `kuksa-val-server` or `kuksa-databroker`:
-
-```python
-# Do authorization by passing a jwt token or a token file
-def authorize(self, token, timeout=2):
-    ...
-
-# Update VSS Tree Entry
-def updateVSSTree(self, jsonStr, timeout=5):
-    ...
-
-# Update Meta Data of a given path
-def updateMetaData(self, path, jsonStr, timeout=5):
-    ...
-
-# Get Meta Data of a given path
-def getMetaData(self, path, timeout=1):
-    ...
-
-# Set value to a given path
-def setValue(self, path, value, timeout=1):
-    ...
-
-# Get value to a given path
-def getValue(self, path, timeout=5):
-    ...
-
-# Subscribe value changes of to a given path.
-# The given callback function will be called then, if the given path is updated.
-def subscribe(self, path, callback, timeout=5):
-    ...
-```
 
 ## Troubleshooting
 
@@ -258,3 +230,10 @@ If you're running both client and server on your local host, make sure that:
 - `localhost` domain name resolution is configured properly on your host.
 - You are not using any proxies for localhost e.g. setting the `no_proxy` environment variable to `localhost,127.0.0.1`.
 - If you are using the `gRPC` protocol in secure mode, the server certificate should have `CN = localhost` in its subject.
+
+2. ``ImportError: cannot import name 'types_pb2' from 'kuksa.val.v1'``:
+It sometimes happens that ``_pb2*.py`` files are not generated on editable installations of kuksa_client.
+In order to manually generate those files and get more details if anything fails, run:
+```console
+python setup.py build_pb2
+```

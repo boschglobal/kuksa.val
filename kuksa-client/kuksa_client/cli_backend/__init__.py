@@ -32,16 +32,19 @@ class Backend:
         self.cacertificate = config.get('cacertificate', str(self.default_cert_path / 'CA.pem'))
         self.certificate = config.get('certificate', str(self.default_cert_path / 'Client.pem'))
         self.keyfile = config.get('key', str(self.default_cert_path / 'Client.key'))
+        self.tokenfile = config.get('token', str(self.default_cert_path / 'jwt/all-read-write.json.token'))
 
     @staticmethod
     def from_config(config):
-        protocol = config['protocol']
+        protocol = config.get('protocol', 'ws')
 
+        # pylint: disable=cyclic-import,import-outside-toplevel
         if protocol == 'ws':
             from . import ws as backend_module
         elif protocol == 'grpc':
             from . import grpc as backend_module
         else:
             raise ValueError(f"Protocol {protocol!r} is not supported")
+        # pylint: enable=cyclic-import,import-outside-toplevel
 
         return backend_module.Backend(config)
