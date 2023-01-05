@@ -28,10 +28,12 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - run: | 
+    - shell: bash
+      run: | 
         docker rm TESTID || true
         docker create --name TESTID --platform  ${{ inputs.platform }}  ${{ inputs.image }}
         docker cp TESTID:${{ inputs.src }} ${{ inputs.dest }}  
         docker rm TESTID
         ls -ahl ${{ inputs.dest }}
+      
   
