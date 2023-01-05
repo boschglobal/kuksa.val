@@ -19,14 +19,20 @@ inputs:
       required: true
       type: string
       description: Path inside container
-    dest:
+    id:
       required: true
       type: string
-      description: Path in workspace
+      description: |
+        This will be the name of the temporary container, making sure we do not leave any stale containers around
+        (we try deleting and before and after running this, so we can recover should a workflow for a given id
+        fail before cleaning up)
+        Will be used for artifact name (if export=true) and to identify 
+        This will also be created as directory in cwd.
+        !No special characters allowed "/" !
     export:
       required: false
       default: false
-      description: Archive dest and export as Actiona artifact
+      description: Archive dest and export as Action artifact
       
 
 runs:
@@ -34,22 +40,22 @@ runs:
   steps:
     - shell: bash
       run: | 
-        mkdir -p ${{ inputs.dest }}
-        docker rm TESTID || true
+        mkdir -p ${{ inputs.id }}
+        docker rm ${{ inputs.id }} || true
         docker create --name TESTID --platform  ${{ inputs.platform }}  ${{ inputs.image }}
-        docker cp TESTID:${{ inputs.src }} ${{ inputs.dest }}  
-        docker rm TESTID
-        ls -ahl ${{ inputs.dest }}
+        docker cp ${{ inputs.id }}:${{ inputs.src }} ${{ inputs.id }}  
+        docker rm ${{ inputs.id }}
+
         
     - if: inputs.export == 'true'
       shell: bash
-      run: tar -czf ${{ inputs.dest }}.tar.gz -C ${{ inputs.dest }} .
+      run: tar -czf ${{ inputs.id }}.tar.gz -C ${{ inputs.id }} .
          
     - if: inputs.export == 'true'
       uses: actions/upload-artifact@v3
       with:
-        name: ${{ inputs.dest }}
-        path: ${{ inputs.dest }}.tar.gz
+        name: ${{ inputs.id }}
+        path: ${{ inputs.id }}.tar.gz
        
       
   
