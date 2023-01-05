@@ -210,7 +210,7 @@ jobs:
       uses: ./.github/actions/copy-from-oci
       with:
         platform: linux/amd64
-        image: ttl.sh/kuksa-databroker-${{github.sha}}:1h
+        image: ttl.sh/kuksa.val/kuksa-databroker-${{github.sha}}:1h
         src: /app
         dest: ./ttt555
 
