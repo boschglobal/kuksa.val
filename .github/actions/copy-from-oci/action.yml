@@ -23,6 +23,10 @@ inputs:
       required: true
       type: string
       description: Path in workspace
+    export:
+      required: false
+      default: false
+      description: Archive dest and export as Actiona artifact
       
 
 runs:
@@ -30,10 +34,16 @@ runs:
   steps:
     - shell: bash
       run: | 
+        mkdir -p ${{ inputs.dest }}
         docker rm TESTID || true
         docker create --name TESTID --platform  ${{ inputs.platform }}  ${{ inputs.image }}
         docker cp TESTID:${{ inputs.src }} ${{ inputs.dest }}  
         docker rm TESTID
         ls -ahl ${{ inputs.dest }}
+        
+     - if: inputs.export == 'true'
+       run: | 
+         tar -czf ${{ inputs.dest }}.tar.gz -C ${{ inputs.dest }} . 
+       
       
   
