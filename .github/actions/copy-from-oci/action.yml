@@ -42,7 +42,7 @@ runs:
       run: | 
         mkdir -p ${{ inputs.id }}
         docker rm ${{ inputs.id }} || true
-        docker create --name TESTID --platform  ${{ inputs.platform }}  ${{ inputs.image }}
+        docker create --name ${{ inputs.id }} --platform  ${{ inputs.platform }}  ${{ inputs.image }}
         docker cp ${{ inputs.id }}:${{ inputs.src }} ${{ inputs.id }}  
         docker rm ${{ inputs.id }}
 
