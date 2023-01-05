@@ -194,7 +194,7 @@ jobs:
         platform: linux/arm64
         id: databroker-arm64
         image: ttl.sh/kuksa.val/kuksa-databroker-${{github.sha}}:1h
-        src: /app/*
+        src: /app/
         export: true
         
     - name:  Extracting AMD64 binaries
@@ -203,7 +203,7 @@ jobs:
         platform: linux/amd64
         id: databroker-amd64
         image: ttl.sh/kuksa.val/kuksa-databroker-${{github.sha}}:1h
-        src: /app/*
+        src: /app/
         export: true
 
   integration-test:
