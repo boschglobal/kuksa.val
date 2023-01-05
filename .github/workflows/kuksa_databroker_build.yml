@@ -196,23 +196,24 @@ jobs:
         mv ./app ./databroker-amd64
         tar -czf databroker-amd64.tar.gz -C databroker-amd64 .
 
-    - name: Extracting ARM64 binaries
-      run: | 
-        docker rm brokerarm || true
-        docker create --name brokerarm --platform linux/arm64 ttl.sh/kuksa.val/kuksa-databroker-${{github.sha}}:1h
-        docker cp brokerarm:/app ./  
-        docker rm brokerarm
-        mv ./app ./databroker-arm64
-        tar -czf databroker-arm64.tar.gz -C databroker-arm64 . 
+#    - name: Extracting ARM64 binaries
+#      run: | 
+#        docker rm brokerarm || true
+#        docker create --name brokerarm --platform linux/arm64 ttl.sh/kuksa.val/kuksa-databroker-${{github.sha}}:1h
+#        docker cp brokerarm:/app ./  
+#        docker rm brokerarm
+#        mv ./app ./databroker-arm64
+#        tar -czf databroker-arm64.tar.gz -C databroker-arm64 . 
 
     - run: mkdir ttt555
-    - name: TEST
+    - name:  Extracting ARM64 binaries
       uses: ./.github/actions/copy-from-oci
       with:
         platform: linux/amd64
         image: ttl.sh/kuksa.val/kuksa-databroker-${{github.sha}}:1h
         src: /app
         dest: ./ttt555
+        export: true
 
     - name: Archive  AMD64 binaries
       uses: actions/upload-artifact@v3
@@ -220,11 +221,11 @@ jobs:
         name: databroker-amd64
         path: ./databroker-amd64.tar.gz 
          
-    - name: Archive  ARM64 binaries
-      uses: actions/upload-artifact@v3
-      with:
-        name: databroker-arm64
-        path: ./databroker-arm64.tar.gz
+#    - name: Archive  ARM64 binaries
+#      uses: actions/upload-artifact@v3
+#      with:
+#        name: databroker-arm64
+#        path: ./databroker-arm64.tar.gz
 
   integration-test:
     name: Run integration test
