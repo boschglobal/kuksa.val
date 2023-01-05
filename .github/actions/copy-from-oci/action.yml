@@ -43,7 +43,13 @@ runs:
         
      - if: inputs.export == 'true'
        run: | 
-         tar -czf ${{ inputs.dest }}.tar.gz -C ${{ inputs.dest }} . 
+         tar -czf ${{ inputs.dest }}.tar.gz -C ${{ inputs.dest }} .
+         
+     - if: inputs.export == 'true'
+       uses: actions/upload-artifact@v3
+       with:
+         name: ${{ inputs.dest }}
+         path: ${{ inputs.dest }}.tar.gz
        
       
   
