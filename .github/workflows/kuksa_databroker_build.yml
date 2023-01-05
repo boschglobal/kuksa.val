@@ -205,14 +205,14 @@ jobs:
         mv ./app ./databroker-arm64
         tar -czf databroker-arm64.tar.gz -C databroker-arm64 . 
 
-    - run: mkdir test
+    - run: mkdir ttt555
     - name: TEST
       uses: ./.github/actions/copy-from-oci
       with:
         platform: linux/amd64
         image: kuksa-databroker-${{github.sha}}:1h
         src: /app
-        dest: ./test
+        dest: ./ttt555
 
     - name: Archive  AMD64 binaries
       uses: actions/upload-artifact@v3
