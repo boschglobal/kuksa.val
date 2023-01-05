@@ -1,0 +1,37 @@
+
+name: Extract from OCI image
+description: Can copy files out of an OCI image
+
+inputs:
+  plattform:
+    required: true
+    type: choice
+    description: Choose platform, e.g. linux/arm64
+    options:
+      - linux/arm64
+      - linux/amd64
+      - linux/riscv64
+    image:
+      required: true
+      type: string
+      description: The OCI image
+    src:
+      required: true
+      type: string
+      description: Path inside container
+    dest:
+      required: true
+      type: string
+      description: Path in workspace
+      
+
+runs:
+  using: "composite"
+  steps:
+    run: | 
+      docker rm TESTID || true
+      docker create --name TESTID --platform  ${{ inputs.platform }}  ${{ inputs.image }}
+      docker cp TESTID:${{ inputs.src }} ${{ inputs.dest }}  
+      docker rm TESTID
+      ls -ahl ${{ inputs.dest }}
+  
