@@ -13,14 +13,14 @@
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Only format generated code if rustfmt is available
-    let rustfmt_available = std::process::Command::new("rustfmt")
-        .arg("--version")
-        .status()
-        .is_ok();
-
+    // let rustfmt_available = std::process::Command::new("rustfmt")
+    //     .arg("--version")
+    //     .status()
+    //     .is_ok();
+    std::env::set_var("PROTOC", protobuf_src::protoc());
     tonic_build::configure()
         .compile_well_known_types(false)
-        .format(rustfmt_available)
+        // .format(rustfmt_available)
         .compile(
             &[
                 "proto/sdv/databroker/v1/broker.proto",

@@ -18,7 +18,7 @@ use tracing::info;
 
 use databroker_proto::{kuksa, sdv};
 
-use crate::broker;
+use crate::{broker, grpc::chariott_v1};
 
 async fn shutdown<F>(databroker: broker::DataBroker, signal: F)
 where
@@ -41,8 +41,26 @@ where
 {
     let addr = addr.parse()?;
 
-    broker.start_housekeeping_task();
+    use chariott::proto::runtime_api::{
+        intent_registration::Intent, intent_service_registration::ExecutionLocality,
+    };
+    use chariott_client::chariott;
+    let (url, _socket_address) = chariott::provider::register(
+        "sdv.kuksa",
+        "0.0.1",
+        "sdv.kuksa",
+        [Intent::Discover, Intent::Read],
+        "CHARIOTT_KUKSA_URL",
+        format!("http://{addr}").as_str(),
+        ExecutionLocality::Local,
+    )
+    .await?;
 
+    broker.start_housekeeping_task();
+    let chariott_provider = chariott_v1::provider::Provider::new(url.clone());
+
+    info!("Listening on {}", addr);
+    info!("Chariott service listening on {}", url);
     Server::builder()
         .http2_keepalive_interval(Some(Duration::from_secs(10)))
         .http2_keepalive_timeout(Some(Duration::from_secs(20)))
@@ -53,6 +71,9 @@ where
             broker.clone(),
         ))
         .add_service(kuksa::val::v1::val_server::ValServer::new(broker.clone()))
+        .add_service(chariott_client::chariott::proto::provider::provider_service_server::ProviderServiceServer::new(
+            chariott_provider,
+        ))
         .serve_with_shutdown(addr, shutdown(broker, signal))
         .await?;
 

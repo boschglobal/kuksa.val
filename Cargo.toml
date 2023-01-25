@@ -20,6 +20,28 @@ members = [
     "kuksa_databroker/databroker-examples",
 ]
 
+[workspace.dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+chariott-common = { path = "./chariott/common/" }
+futures = { version = "0.3" }
+lazy_static = "1.4.0"
+prost = "0.11"
+prost-types = "0.11"
+regex = "1.6"
+serde = "1.0.147"
+serde_json = "1.0.87"
+tokio = { version = "1.21.2", features = ["macros"] }
+tokio-util = "0.7.3"
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = "0.8"
+tonic-build = "0.8"
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.2.1", features = ["v4"] }
+url = "2.2"
+test-case = "2.2.2"
+
 [profile.release]
 lto = true                 # Link time optimization (dead code removal etc...)
 opt-level = "s"
