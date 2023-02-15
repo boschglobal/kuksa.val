@@ -8,7 +8,7 @@ on:
 
 jobs:
   check_push_rights:
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest, self-hosted]
     outputs:
       have_secrets: ${{ steps.check-secrets.outputs.have_secrets }}
 
