@@ -16,8 +16,9 @@ jobs:
 
     - name: Get changed files
       run: |
-        git fetch origin
-        echo "files=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}..origin/${{ github.event.pull_request.head.ref }} | tr '\n' ',')" >> $GITHUB_ENV
+        ls
+        pwd
+        echo "files=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | tr '\n' ',')" >> $GITHUB_ENV
         
     - name: Check SPDX Licenses
       run: |
