@@ -117,6 +117,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let tls_config = tonic::transport::ClientTlsConfig::new()
             .ca_certificate(ca_cert)
+            // This is a hack - we expect the certificate to have "Server" as subjectAltName
+            // TODO: Find a better way to dynamically set domain_name
+            // Either dynamically from cli.server
+            // Or by an argument - compare with tls_server_name in kuksa-client
             .domain_name("Server");
 
         client.set_tls_config(tls_config);

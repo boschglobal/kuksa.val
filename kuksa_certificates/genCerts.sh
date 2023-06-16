@@ -15,9 +15,15 @@ genKey() {
     openssl genrsa -out $1.key 2048
 }
 
+# This method (and how it is called) contains some hacks to pass name verification
+# CN is called as per argument
+# We also include that as subjectAltName
+# databroker-cli currently expects certificate for Databroker to be called "Server"
+# We add localhost and 127.0.0.1 as subjectAltName as they are common names used in test
+# (But many TLS-client implementations ignore IP:XXX.XXX.XXX.XXX alt names)
 genCert() {
     openssl req -new -key $1.key -out $1.csr -passin pass:"temp" -subj "/C=CA/ST=Ontario/L=Ottawa/O=Eclipse.org Foundation, Inc./CN=$1/emailAddress=kuksa-dev@eclipse.org"
-    openssl x509 -req -in $1.csr -extfile <(printf "subjectAltName=DNS:$1") -CA CA.pem -CAkey CA.key -CAcreateserial -days 365 -out $1.pem
+    openssl x509 -req -in $1.csr -extfile <(printf "subjectAltName=DNS:$1, DNS:localhost, IP:127.0.0.1") -CA CA.pem -CAkey CA.key -CAcreateserial -days 365 -out $1.pem
     openssl verify -CAfile CA.pem $1.pem
 }
 
