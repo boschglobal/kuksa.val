@@ -36,6 +36,7 @@ class Backend(cli_backend.Backend):
         super().__init__(config)
         self.wsConnected = False
 
+        self.token = None
         self.subscriptionCallbacks = {}
         self.sendMsgQueue = queue.Queue()
         self.recvMsgQueues = {}
@@ -125,10 +126,8 @@ class Backend(cli_backend.Backend):
             token = token_or_tokenfile.expanduser().read_text(encoding='utf-8')
         else:
             token = token_or_tokenfile
-        req = {}
-        req["action"] = "authorize"
-        req["tokens"] = token
-        return self._sendReceiveMsg(req, timeout)
+        self.token = token
+        return "OK"
 
     # Update VSS Tree Entry
     def updateVSSTree(self, jsonStr, timeout=5):
@@ -165,6 +164,8 @@ class Backend(cli_backend.Backend):
         req["action"] = "set"
         req["path"] = path
         req["attribute"] = attribute
+        if self.token:
+            req["authorization"] = self.token
         try:
             jsonValue = json.loads(value)
             if isinstance(jsonValue, list):
@@ -184,6 +185,9 @@ class Backend(cli_backend.Backend):
         req["action"] = "get"
         req["path"] = path
         req["attribute"] = attribute
+        if self.token:
+            req["authorization"] = self.token
+
         return self._sendReceiveMsg(req, timeout)
 
     # Subscribe value changes of to a given path.
@@ -195,6 +199,9 @@ class Backend(cli_backend.Backend):
         req["action"] = "subscribe"
         req["path"] = path
         req["attribute"] = attribute
+        if self.token:
+            req["authorization"] = self.token
+
         res = self._sendReceiveMsg(req, timeout)
         resJson = json.loads(res)
         if "subscriptionId" in resJson:
