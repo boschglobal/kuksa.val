@@ -39,7 +39,7 @@ pub enum UpdateError {
     PermissionExpired,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ReadError {
     NotFound,
     PermissionDenied,
@@ -850,16 +850,59 @@ pub struct DatabaseWriteAccess<'a, 'b> {
     permissions: &'b Permissions,
 }
 
-pub struct EntryIterator<'a> {
-    inner: std::collections::hash_map::Values<'a, i32, Entry>,
+pub enum EntryReadAccess<'a> {
+    Entry(&'a Entry),
+    Err(&'a Metadata, ReadError),
 }
 
-impl<'a> Iterator for EntryIterator<'a> {
-    type Item = &'a Entry;
+impl<'a> EntryReadAccess<'a> {
+    pub fn datapoint(&self) -> Result<&Datapoint, ReadError> {
+        match self {
+            Self::Entry(entry) => Ok(&entry.datapoint),
+            Self::Err(_, err) => Err(err.clone()),
+        }
+    }
+
+    pub fn actuator_target(&self) -> Result<&Option<Datapoint>, ReadError> {
+        match self {
+            Self::Entry(entry) => Ok(&entry.actuator_target),
+            Self::Err(_, err) => Err(err.clone()),
+        }
+    }
+
+    pub fn metadata(&self) -> &Metadata {
+        match self {
+            Self::Entry(entry) => &entry.metadata,
+            Self::Err(metadata, _) => metadata,
+        }
+    }
+}
+
+impl<'a> EntryReadAccess<'a> {
+    fn new(entry: &'a Entry, permissions: &Permissions) -> Self {
+        match permissions.can_read(&entry.metadata.path) {
+            Ok(()) => Self::Entry(entry),
+            Err(PermissionError::Denied) => Self::Err(&entry.metadata, ReadError::PermissionDenied),
+            Err(PermissionError::Expired) => {
+                Self::Err(&entry.metadata, ReadError::PermissionExpired)
+            }
+        }
+    }
+}
+
+pub struct EntryReadIterator<'a, 'b> {
+    inner: std::collections::hash_map::Values<'a, i32, Entry>,
+    permissions: &'b Permissions,
+}
+
+impl<'a, 'b> Iterator for EntryReadIterator<'a, 'b> {
+    type Item = EntryReadAccess<'a>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
+        self.inner
+            .next()
+            .map(|entry| EntryReadAccess::new(entry, self.permissions))
     }
 
     #[inline]
@@ -887,20 +930,6 @@ impl<'a, 'b> DatabaseReadAccess<'a, 'b> {
         }
     }
 
-    pub fn get_entries_by_regex(&self, regex: regex::Regex) -> Result<Vec<Entry>, ReadError> {
-        let mut entries: Vec<Entry> = Vec::new();
-        for (_, value) in self.db.entries.iter() {
-            if regex.is_match(&value.metadata.path) {
-                entries.push(value.clone());
-            }
-        }
-        if entries.is_empty() {
-            return Err(ReadError::NotFound);
-        }
-
-        Ok(entries)
-    }
-
     pub fn get_metadata_by_id(&self, id: i32) -> Option<&Metadata> {
         self.db.entries.get(&id).map(|entry| &entry.metadata)
     }
@@ -910,9 +939,10 @@ impl<'a, 'b> DatabaseReadAccess<'a, 'b> {
         self.get_metadata_by_id(*id)
     }
 
-    pub fn iter_entries(&self) -> EntryIterator {
-        EntryIterator {
+    pub fn iter_entries(&self) -> EntryReadIterator {
+        EntryReadIterator {
             inner: self.db.entries.values(),
+            permissions: self.permissions,
         }
     }
 }
@@ -1187,15 +1217,6 @@ impl<'a, 'b> AuthorizedAccess<'a, 'b> {
             .cloned()
     }
 
-    pub async fn get_entries_by_regex(&self, regex: regex::Regex) -> Result<Vec<Entry>, ReadError> {
-        self.broker
-            .database
-            .read()
-            .await
-            .authorized_read_access(self.permissions)
-            .get_entries_by_regex(regex)
-    }
-
     pub async fn get_entry_by_id(&self, id: i32) -> Result<Entry, ReadError> {
         self.broker
             .database
@@ -1206,7 +1227,7 @@ impl<'a, 'b> AuthorizedAccess<'a, 'b> {
             .cloned()
     }
 
-    pub async fn for_each_entry(&self, f: impl FnMut(&Entry)) {
+    pub async fn for_each_entry(&self, f: impl FnMut(EntryReadAccess)) {
         self.broker
             .database
             .read()
@@ -1216,7 +1237,7 @@ impl<'a, 'b> AuthorizedAccess<'a, 'b> {
             .for_each(f)
     }
 
-    pub async fn map_entries<T>(&self, f: impl FnMut(&Entry) -> T) -> Vec<T> {
+    pub async fn map_entries<T>(&self, f: impl FnMut(EntryReadAccess) -> T) -> Vec<T> {
         self.broker
             .database
             .read()
@@ -1227,7 +1248,10 @@ impl<'a, 'b> AuthorizedAccess<'a, 'b> {
             .collect()
     }
 
-    pub async fn filter_map_entries<T>(&self, f: impl FnMut(&Entry) -> Option<T>) -> Vec<T> {
+    pub async fn filter_map_entries<T>(
+        &self,
+        f: impl FnMut(EntryReadAccess) -> Option<T>,
+    ) -> Vec<T> {
         self.broker
             .database
             .read()
@@ -2880,7 +2904,7 @@ mod tests {
         // No permissions
         let permissions = Permissions::builder().build().unwrap();
         let broker = db.authorized_access(&permissions);
-        let metadata = broker.map_entries(|entry| entry.metadata.clone()).await;
+        let metadata = broker.map_entries(|entry| entry.metadata().clone()).await;
         for entry in metadata {
             match entry.path.as_str() {
                 "Vehicle.Test1" => assert_eq!(entry.id, id1),

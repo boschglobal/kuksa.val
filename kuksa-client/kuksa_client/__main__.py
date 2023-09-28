@@ -35,16 +35,15 @@ from cmd2 import Cmd
 from cmd2 import CompletionItem
 from cmd2 import with_argparser
 from cmd2 import with_category
+from cmd2 import constants
 from cmd2.utils import basic_complete
+from urllib.parse import urlparse
 
 import kuksa_certificates
 from kuksa_client import KuksaClientThread
 from kuksa_client import _metadata
 
-DEFAULT_SERVER_ADDR = "127.0.0.1"
-DEFAULT_SERVER_PORT = 8090
-DEFAULT_SERVER_PROTOCOL = "ws"
-SUPPORTED_SERVER_PROTOCOLS = ("ws", "grpc")
+DEFAULT_SERVER_ADDR = "grpc://127.0.0.1:55555"
 
 scriptDir = os.path.dirname(os.path.realpath(__file__))
 
@@ -57,76 +56,79 @@ def assignment_statement(arg):
     return (path, value)
 
 
+def display_completions(completions, delimiter):
+    # Index of what prefix to remove from displayed items
+    # I.e. "Vehicle." should be removed if the common prefix is "Vehicle.Ve".
+    prefix_idx = os.path.commonprefix(completions).rfind(delimiter) + 1
+    matches = []
+    for path in completions:
+        path = path[prefix_idx:]
+        # Only display completions up to (and including) the next delimiter.
+        next_dot = path.find(delimiter)
+        if next_dot != -1:
+            path = path[:next_dot+1]
+        matches.append(path)
+    return matches
+
+
+def metadata_tree_to_dict(tree):
+    def add_children(flattened_tree, path, value):
+        if "children" in value:
+            for child_path, value in value["children"].items():
+                add_children(flattened_tree, f"{path}.{child_path}", value)
+        else:
+            flattened_tree[path] = value
+    flattened_tree = {}
+
+    for key, value in tree.items():
+        add_children(flattened_tree, key, value)
+
+    return flattened_tree
+
+
 # pylint: disable=too-many-instance-attributes
 # pylint: disable=too-many-public-methods
 class TestClient(Cmd):
-    def get_childtree(self, pathText):
-        childVssTree = self.vssTree
-
-        paths = [pathText]
-        if "/" in pathText:
-            paths = pathText.split("/")
-        elif "." in pathText:
-            paths = pathText.split(".")
-
-        for path in paths[:-1]:
-            if path in childVssTree:
-                childVssTree = childVssTree[path]
-            elif 'children' in childVssTree and path in childVssTree['children']:
-                childVssTree = childVssTree['children'][path]
-            else:
-                # This else-branch is reached when one of the path components is invalid
-                # In that case stop parsing further and return an empty tree
-                # Autocompletion can't help here.
-                childVssTree = {}
-                break
-
-        if 'children' in childVssTree:
-            childVssTree = childVssTree['children']
-        return childVssTree
+    def refresh_metadata(self):
+        if self.server.startswith("grpc"):
+            entries = json.loads(self.getMetaData("**"))
+            if 'error' in entries:
+                raise Exception("Wrong databroker version, please use a newer version")
+            # Convert to dict with paths as key
+            self.metadata = {entry["path"]: entry for entry in entries}
+        else:
+            entries = json.loads(self.getMetaData("*"))
+            if 'metadata' in entries:
+                # Convert to dict with paths as key
+                self.metadata = metadata_tree_to_dict(entries['metadata'])
 
     def path_completer(self, text, line, begidx, endidx):
         if not self.checkConnection():
             return None
+
         if len(self.pathCompletionItems) == 0:
-            tree = json.loads(self.getMetaData("*"))
+            self.refresh_metadata()
 
-            if 'metadata' in tree:
-                self.vssTree = tree['metadata']
-
-        self.pathCompletionItems = []
-        childTree = self.get_childtree(text)
-        prefix = ""
-        seperator = "/"
-
+        # Normalize the delimiter used
+        delimiter = "."
         if "/" in text:
-            prefix = text[:text.rfind("/")]+"/"
-        elif "." in text:
-            prefix = text[:text.rfind(".")]+"."
-            seperator = "."
+            delimiter = "/"
+            text = text.replace(delimiter, ".")
 
-        for key in childTree:
-            child = childTree[key]
-            if isinstance(child, dict):
-                description = ""
-                nodetype = "unknown"
+        # Generate the list of all possible completions
+        self.pathCompletionItems = []
+        for path in self.metadata.keys():
+            # Compare case insensitive
+            if path.lower().startswith(text.lower()):
+                if delimiter != ".":
+                    path = path.replace(".", delimiter)
+                self.pathCompletionItems.append(path)
 
-                if 'description' in child:
-                    description = child['description']
+        # Generate the list of completions to display
+        self.display_matches = display_completions(self.pathCompletionItems, delimiter)
 
-                if 'type' in child:
-                    nodetype = child['type'].capitalize()
-
-                self.pathCompletionItems.append(CompletionItem(
-                    prefix + key, nodetype+": " + description))
-
-                if 'children' in child:
-                    self.pathCompletionItems.append(
-                        CompletionItem(prefix + key+seperator,
-                                       "Children of branch "+prefix+key),
-                    )
-
-        return basic_complete(text, line, begidx, endidx, self.pathCompletionItems)
+        # Return all completions
+        return self.pathCompletionItems
 
     def subscribeCallback(self, logPath, resp):
         if logPath is None:
@@ -146,10 +148,11 @@ class TestClient(Cmd):
     VSS_COMMANDS = "Kuksa Interaction Commands"
     INFO_COMMANDS = "Info Commands"
 
-    ap_getServerAddr = argparse.ArgumentParser()
     ap_connect = argparse.ArgumentParser()
     ap_connect.add_argument(
-        '-i', "--insecure", default=False, action="store_true", help='Connect in insecure mode')
+        'server', help=f"VSS server to connect to. Format: protocol://host[:port]. \
+        Supported protocols: [grpc, grpcs, ws, wss]. Example: {DEFAULT_SERVER_ADDR}",)
+
     ap_disconnect = argparse.ArgumentParser()
     ap_authorize = argparse.ArgumentParser()
     tokenfile_completer_method = functools.partial(
@@ -160,17 +163,6 @@ class TestClient(Cmd):
         'token_or_tokenfile',
         help='JWT(or the file storing the token) for authorizing the client.',
         completer_method=tokenfile_completer_method,)
-    ap_setServerAddr = argparse.ArgumentParser()
-    ap_setServerAddr.add_argument(
-        'IP', help='VISS/gRPC Server IP Address', default=DEFAULT_SERVER_ADDR)
-    ap_setServerAddr.add_argument(
-        'Port', type=int, help='VISS/gRPC Server Port', default=DEFAULT_SERVER_PORT)
-    ap_setServerAddr.add_argument(
-        '-p',
-        "--protocol",
-        help='VISS/gRPC Server Communication Protocol (ws or grpc)',
-        default=DEFAULT_SERVER_PROTOCOL,
-    )
 
     ap_setValue = argparse.ArgumentParser()
     ap_setValue.add_argument(
@@ -265,35 +257,33 @@ class TestClient(Cmd):
         "Json", help="Json tree to update VSS", completer_method=jsonfile_completer_method)
 
     # Constructor, request names after protocol to avoid errors
-    def __init__(self, server_ip=None, server_port=None, server_protocol=None, *,
-                 insecure=False, token_or_tokenfile=None,
+    def __init__(self, server=None, token_or_tokenfile=None,
                  certificate=None, keyfile=None,
                  cacertificate=None, tls_server_name=None):
+        shortcuts = constants.DEFAULT_SHORTCUTS
+        shortcuts.update({'exit': 'quit'})
         super().__init__(
-            persistent_history_file=".vssclient_history", persistent_history_length=100, allow_cli_args=False,
+            persistent_history_file=".vssclient_history", persistent_history_length=100,
+            shortcuts=shortcuts, allow_cli_args=False,
         )
 
         self.prompt = "Test Client> "
         self.max_completion_items = 20
-        self.serverIP = server_ip or DEFAULT_SERVER_ADDR
-        self.serverPort = server_port or DEFAULT_SERVER_PORT
-        self.serverProtocol = server_protocol or DEFAULT_SERVER_PROTOCOL
-        self.supportedProtocols = SUPPORTED_SERVER_PROTOCOLS
-        self.vssTree = {}
+        self.server = server or DEFAULT_SERVER_ADDR
+
+        self.metadata = {}
         self.pathCompletionItems = []
         self.subscribeIds = set()
         self.commThread = None
         self.token_or_tokenfile = token_or_tokenfile
-        self.insecure = insecure
         self.certificate = certificate
         self.keyfile = keyfile
         self.cacertificate = cacertificate
         self.tls_server_name = tls_server_name
 
-        print("Welcome to Kuksa Client version " + str(_metadata.__version__))
-        print()
         with (pathlib.Path(scriptDir) / 'logo').open('r', encoding='utf-8') as f:
-            print(f.read())
+            logo = f.read()
+            print(logo.replace("%ver%", str(_metadata.__version__)))
         print("Default tokens directory: " + self.getDefaultTokenDir())
 
         print()
@@ -524,11 +514,36 @@ class TestClient(Cmd):
             if self.commThread is not None:
                 self.commThread.stop()
                 self.commThread = None
-        config = {'ip': self.serverIP,
-                  'port': self.serverPort,
-                  'insecure': self.insecure,
-                  'protocol': self.serverProtocol
-                  }
+
+        # Check we have a valid server URI
+        srv = urlparse(self.server)
+        config = {"port": 55555, "insecure": True}
+
+        if srv.scheme in ["grpc", "grpcs"]:
+            config["protocol"] = "grpc"
+        elif srv.scheme in ["ws", "wss"]:
+            config["protocol"] = "ws"
+            config["port"] = 8090
+        else:
+            print(f"Invalid server URI. Unsupported protocol: {srv.scheme} ")
+            return
+
+        if srv.port is not None:
+            config["port"] = srv.port
+
+        if srv.scheme in ["grpcs", "wss"]:
+            config["insecure"] = False
+
+        if srv.hostname is None:
+            print("No hostname or IP given")
+            return
+
+        config["ip"] = srv.hostname
+
+        # Explain were we are connecting to:
+        print(f"Connecting to VSS server at {config['ip']} port {config['port']} \
+using {'KUKSA GRPC' if config['protocol'] == 'grpc' else 'VISS' } protocol.")
+        print(f"TLS will {'not be' if config['insecure'] else 'be'} used.")
 
         # Configs should only be added if they actually have a value
         if self.token_or_tokenfile:
@@ -561,33 +576,9 @@ class TestClient(Cmd):
     @with_category(COMM_SETUP_COMMANDS)
     @with_argparser(ap_connect)
     def do_connect(self, args):
-        self.insecure = args.insecure
+        """Connect to a VSS server"""
+        self.server = args.server
         self.connect()
-
-    @with_category(COMM_SETUP_COMMANDS)
-    @with_argparser(ap_setServerAddr)
-    def do_setServerAddress(self, args):
-        """Sets the IP Address for the VISS/gRPC Server"""
-        try:
-            self.serverIP = args.IP
-            self.serverPort = args.Port
-            if args.protocol not in self.supportedProtocols:
-                raise ValueError
-            self.serverProtocol = args.protocol
-            print("Setting Server Address to " + args.IP + ":" +
-                  str(args.Port) + " with protocol " + args.protocol)
-        except ValueError:
-            print(
-                "Error: Please give a valid server Address/Protocol. Only ws and grpc are supported.")
-
-    @with_category(COMM_SETUP_COMMANDS)
-    @with_argparser(ap_getServerAddr)
-    def do_getServerAddress(self, _args):
-        """Gets the IP Address for the VISS/gRPC Server"""
-        if hasattr(self, "serverIP") and hasattr(self, "serverPort"):
-            print(self.serverIP + ":" + str(self.serverPort))
-        else:
-            print("Server IP not set!!")
 
     def getDefaultTokenDir(self):
         try:
@@ -626,17 +617,8 @@ class TestClient(Cmd):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--ip', help="VISS/gRPC Server IP Address", default=DEFAULT_SERVER_ADDR)
-    parser.add_argument(
-        '--port', type=int, help="VISS/gRPC Server Port", default=DEFAULT_SERVER_PORT)
-    parser.add_argument(
-        '--protocol',
-        help="VISS/gRPC Server Communication Protocol",
-        choices=SUPPORTED_SERVER_PROTOCOLS,
-        default=DEFAULT_SERVER_PROTOCOL,
-    )
-    parser.add_argument('--insecure', default=False,
-                        action='store_true', help='Connect in insecure mode')
+        'server', nargs='?', help=f"VSS server to connect to. Format: protocol://host[:port]. \
+        Supported protocols: [grpc, grpcs, ws, wss]. Example: {DEFAULT_SERVER_ADDR}", default=DEFAULT_SERVER_ADDR)
     parser.add_argument(
         '--logging-config', default=os.path.join(scriptDir, 'logging.ini'), help="Path to logging configuration file",
     )
@@ -653,7 +635,8 @@ def main():
         '--keyfile', default=None, help="Client private key file (.key), only needed for mutual authentication",
     )
     parser.add_argument(
-        '--cacertificate', default=None, help="Client root cert file (.pem), needed unless insecure mode used",
+        '--cacertificate', default=None, help="Client root cert file (.pem). \
+        Needed for TLS enabled transports (grpcs, wss)",
     )
     # Observations for Python
     # Connecting to "localhost" works well, subjectAltName seems to suffice
@@ -668,8 +651,7 @@ def main():
 
     logging.config.fileConfig(args.logging_config)
 
-    clientApp = TestClient(args.ip, args.port, args.protocol,
-                           insecure=args.insecure, token_or_tokenfile=args.token_or_tokenfile,
+    clientApp = TestClient(args.server, token_or_tokenfile=args.token_or_tokenfile,
                            certificate=args.certificate, keyfile=args.keyfile,
                            cacertificate=args.cacertificate, tls_server_name=args.tls_server_name)
     try:
