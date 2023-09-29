@@ -45,6 +45,9 @@ jobs:
       - name: cargo clippy
         working-directory: ${{github.workspace}}
         run: cargo clippy --all-targets -- -W warnings -D warnings
+      - name: cargo clippy feature kuksa
+        working-directory: ${{github.workspace}}
+        run: cargo clippy --all-targets --no-default-features --features feature_kuksa -- -W warnings -D warnings
 
       - name: "Createbom: License check and Dash output generation"
         working-directory: ${{github.workspace}}/kuksa_databroker/createbom
