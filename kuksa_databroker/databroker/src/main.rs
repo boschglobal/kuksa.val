@@ -29,87 +29,9 @@ use tracing::{debug, error, info};
 
 use clap::{Arg, ArgAction, Command};
 
+#[cfg(feature = "viss")]
+use databroker::viss;
 use databroker::{broker, grpc, permissions, vss};
-
-// Hardcoded datapoints
-const DATAPOINTS: &[(
-    &str,
-    broker::DataType,
-    broker::ChangeType,
-    broker::EntryType,
-    &str,
-)] = &[
-    (
-        "Vehicle.Cabin.Seat.Row1.Pos1.Position",
-        broker::DataType::Uint32,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Actuator,
-        "Vehicle cabin seat position. Row 1 Position 1",
-    ),
-    (
-        "Vehicle.Cabin.Seat.Row1.Pos2.Position",
-        broker::DataType::Uint32,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Actuator,
-        "Vehicle cabin seat position. Row 1 Position 2",
-    ),
-    (
-        "Vehicle.Speed",
-        broker::DataType::Float,
-        broker::ChangeType::Continuous,
-        broker::EntryType::Sensor,
-        "Vehicle speed",
-    ),
-    (
-        "Vehicle.ADAS.ABS.Error",
-        broker::DataType::String,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Attribute,
-        "ADAS ABS error message",
-    ),
-    (
-        "Vehicle.ADAS.ABS.IsActive",
-        broker::DataType::Bool,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Actuator,
-        "Whether ADAS ABS is active",
-    ),
-    (
-        "Vehicle.ADAS.ABS.IsEngaged",
-        broker::DataType::Bool,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Actuator,
-        "Whether ADAS ABS is engaged",
-    ),
-    (
-        "Vehicle.ADAS.CruiseControl.Error",
-        broker::DataType::String,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Attribute,
-        "ADAS Cruise control error message",
-    ),
-    (
-        "Vehicle.ADAS.CruiseControl.IsActive",
-        broker::DataType::Bool,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Actuator,
-        "Whether ADAS Cruise control is active",
-    ),
-    (
-        "Vehicle.ADAS.CruiseControl.SpeedSet",
-        broker::DataType::Bool,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Actuator,
-        "Whether ADAS Cruise control has the speed set",
-    ),
-    (
-        "Vehicle.TestArray",
-        broker::DataType::StringArray,
-        broker::ChangeType::OnChange,
-        broker::EntryType::Sensor,
-        "Run of the mill test array",
-    ),
-];
 
 async fn shutdown_handler() {
     let mut sigint =
@@ -123,6 +45,60 @@ async fn shutdown_handler() {
         _ = sighup.recv() => info!("received SIGHUP"),
         _ = sigterm.recv() => info!("received SIGTERM"),
     };
+}
+
+async fn add_kuksa_attribute(
+    database: &broker::AuthorizedAccess<'_, '_>,
+    attribute: String,
+    value: String,
+    description: String,
+) {
+    debug!("Adding attribute {}", attribute);
+
+    match database
+        .add_entry(
+            attribute.clone(),
+            databroker::broker::DataType::String,
+            databroker::broker::ChangeType::OnChange,
+            databroker::broker::EntryType::Attribute,
+            description,
+            None,
+        )
+        .await
+    {
+        Ok(id) => {
+            let ids = [(
+                id,
+                broker::EntryUpdate {
+                    datapoint: Some(broker::Datapoint {
+                        ts: std::time::SystemTime::now(),
+                        value: broker::types::DataValue::String(value),
+                    }),
+                    path: None,
+                    actuator_target: None,
+                    entry_type: None,
+                    data_type: None,
+                    description: None,
+                    allowed: None,
+                },
+            )];
+            if let Err(errors) = database.update_entries(ids).await {
+                // There's only one error (since we're only trying to set one)
+                if let Some(error) = errors.get(0) {
+                    info!("Failed to set value for {}: {:?}", attribute, error.1);
+                }
+            }
+        }
+        Err(RegistrationError::PermissionDenied) => {
+            error!("Failed to add entry {attribute}: Permission denied")
+        }
+        Err(RegistrationError::PermissionExpired) => {
+            error!("Failed to add entry {attribute}: Permission expired")
+        }
+        Err(RegistrationError::ValidationError) => {
+            error!("Failed to add entry {attribute}: Validation failed")
+        }
+    }
 }
 
 async fn read_metadata_file<'a, 'b>(
@@ -264,14 +240,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("disable-authorization")
                 .help("Disable authorization")
                 .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("dummy-metadata")
-                .display_order(10)
-                .long("dummy-metadata")
-                .action(ArgAction::SetTrue)
-                .help("Populate data broker with dummy metadata")
-                .required(false),
         );
 
     #[cfg(feature = "tls")]
@@ -279,14 +247,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         parser = parser
             .arg(
                 Arg::new("insecure")
-                    .display_order(6)
+                    .display_order(20)
                     .long("insecure")
                     .help("Allow insecure connections")
                     .action(ArgAction::SetTrue),
             )
             .arg(
                 Arg::new("tls-cert")
-                    .display_order(5)
+                    .display_order(21)
                     .long("tls-cert")
                     .help("TLS certificate file (.pem)")
                     .action(ArgAction::Set)
@@ -295,12 +263,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .arg(
                 Arg::new("tls-private-key")
-                    .display_order(5)
+                    .display_order(22)
                     .long("tls-private-key")
                     .help("TLS private key file (.key)")
                     .action(ArgAction::Set)
                     .value_name("FILE")
                     .conflicts_with("insecure"),
+            );
+    }
+
+    #[cfg(feature = "viss")]
+    {
+        parser = parser
+            .arg(
+                Arg::new("enable-viss")
+                    .display_order(30)
+                    .long("enable-viss")
+                    .help("Enable VISSv2 (websocket) service")
+                    .action(ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("viss-address")
+                    .display_order(31)
+                    .long("viss-address")
+                    .help("VISS address")
+                    .action(ArgAction::Set)
+                    .value_name("IP")
+                    .required(false)
+                    .env("KUKSA_DATABROKER_VISS_ADDR")
+                    .default_value("127.0.0.1"),
+            )
+            .arg(
+                Arg::new("viss-port")
+                    .display_order(32)
+                    .long("viss-port")
+                    .help("VISS port")
+                    .action(ArgAction::Set)
+                    .value_name("PORT")
+                    .required(false)
+                    .env("KUKSA_DATABROKER_VISS_PORT")
+                    .value_parser(clap::value_parser!(u16))
+                    .default_value("8090"),
             );
     }
 
@@ -320,51 +323,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let broker = broker::DataBroker::new(version);
     let database = broker.authorized_access(&permissions::ALLOW_ALL);
 
-    if args.contains_id("dummy-metadata") {
-        info!("Populating (hardcoded) metadata");
-        for (name, data_type, change_type, entry_type, description) in DATAPOINTS {
-            if let Ok(id) = database
-                .add_entry(
-                    name.to_string(),
-                    data_type.clone(),
-                    change_type.clone(),
-                    entry_type.clone(),
-                    description.to_string(),
-                    None,
-                )
-                .await
-            {
-                if name == &"Vehicle.TestArray" {
-                    match database
-                        .update_entries([(
-                            id,
-                            broker::EntryUpdate {
-                                path: None,
-                                datapoint: Some(broker::Datapoint {
-                                    ts: std::time::SystemTime::now(),
-                                    value: databroker::broker::DataValue::StringArray(vec![
-                                        String::from("yes"),
-                                        String::from("no"),
-                                        String::from("maybe"),
-                                        String::from("nah"),
-                                    ]),
-                                }),
-                                actuator_target: None,
-                                entry_type: None,
-                                data_type: None,
-                                description: None,
-                                allowed: None,
-                            },
-                        )])
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => println!("{e:?}"),
-                    }
-                }
-            }
-        }
-    }
+    add_kuksa_attribute(
+        &database,
+        "Kuksa.Databroker.GitVersion".to_owned(),
+        option_env!("VERGEN_GIT_SEMVER_LIGHTWEIGHT")
+            .unwrap_or("N/A")
+            .to_owned(),
+        "Databroker version as reported by GIT".to_owned(),
+    )
+    .await;
+
+    add_kuksa_attribute(
+        &database,
+        "Kuksa.Databroker.CargoVersion".to_owned(),
+        option_env!("CARGO_PKG_VERSION").unwrap_or("N/A").to_owned(),
+        "Databroker version as reported by GIT".to_owned(),
+    )
+    .await;
+
+    add_kuksa_attribute(
+        &database,
+        "Kuksa.Databroker.CommitSha".to_owned(),
+        option_env!("VERGEN_GIT_SHA").unwrap_or("N/A").to_owned(),
+        "Commit SHA of current version".to_owned(),
+    )
+    .await;
 
     if let Some(metadata_filenames) = args.get_many::<String>("vss-file") {
         for filename in metadata_filenames {
@@ -431,6 +414,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         (false, _) => Authorization::Disabled,
     };
+
+    #[cfg(feature = "viss")]
+    {
+        let viss_port = args
+            .get_one::<u16>("viss-port")
+            .expect("port should be a number");
+        let viss_addr = std::net::SocketAddr::new(ip_addr, *viss_port);
+
+        if args.get_flag("enable-viss") {
+            let broker = broker.clone();
+            let authorization = authorization.clone();
+            tokio::spawn(async move {
+                if let Err(err) = viss::server::serve(viss_addr, broker, authorization).await {
+                    error!("{err}");
+                }
+            });
+        }
+    }
 
     grpc::server::serve(
         addr,
