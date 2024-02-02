@@ -12,7 +12,6 @@
 ********************************************************************************/
 
 use databroker_proto::sdv::databroker as proto;
-use kuksa_sdv::*;
 
 use prost_types::Timestamp;
 use tokio_stream::StreamExt;
@@ -83,11 +82,11 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
     cli::set_disconnected_prompt(&interface);
 
-    let mut client = SDVClient::new(kuksa_common::to_uri(cli.get_server())?);
+    let mut client = databroker_grpc::Client::new(kuksa_grpc::to_uri(cli.get_server())?);
 
     if let Some(token_filename) = cli.get_token_file() {
         let token = std::fs::read_to_string(token_filename)?;
-        client.basic_client.set_access_token(token)?;
+        client.set_access_token(token)?;
     }
 
     #[cfg(feature = "tls")]
@@ -97,20 +96,20 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         let tls_config = tonic::transport::ClientTlsConfig::new().ca_certificate(ca_cert);
 
-        client.basic_client.set_tls_config(tls_config);
+        client.set_tls_config(tls_config);
     }
 
-    let mut connection_state_subscription = client.basic_client.subscribe_to_connection_state();
+    let mut connection_state_subscription = client.subscribe_to_connection_state();
     let interface_ref = interface.clone();
 
     tokio::spawn(async move {
         while let Some(state) = connection_state_subscription.next().await {
             match state {
                 Ok(state) => match state {
-                    kuksa_common::ConnectionState::Connected => {
+                    kuksa_grpc::ConnectionState::Connected => {
                         cli::set_connected_prompt(&interface_ref, VERSION.to_string());
                     }
-                    kuksa_common::ConnectionState::Disconnected => {
+                    kuksa_grpc::ConnectionState::Disconnected => {
                         cli::set_disconnected_prompt(&interface_ref);
                     }
                 },
@@ -147,12 +146,9 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             };
             cli::print_logo(version);
 
-            match client.basic_client.try_connect().await {
+            match client.try_connect().await {
                 Ok(()) => {
-                    cli::print_info(format!(
-                        "Successfully connected to {}",
-                        client.basic_client.get_uri()
-                    ))?;
+                    cli::print_info(format!("Successfully connected to {}", client.get_uri()))?;
 
                     let pattern = vec![];
 
@@ -162,15 +158,16 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 .set_completer(Arc::new(CliCompleter::from_metadata(&metadata)));
                             properties = metadata;
                         }
-                        Err(kuksa_common::ClientError::Status(status)) => {
-                            cli::print_resp_err("metadata", &status)?;
-                        }
-                        Err(kuksa_common::ClientError::Connection(msg)) => {
-                            cli::print_error("metadata", msg)?;
-                        }
-                        Err(kuksa_common::ClientError::Function(msg)) => {
-                            cli::print_resp_err_fmt("metadata", format_args!("Error {msg:?}"))?;
-                        }
+                        // Err(databroker_grpc::Error::Status(status)) => {
+                        //     cli::print_resp_err("metadata", &status)?;
+                        // }
+                        // Err(databroker_grpc::Error::Connection(msg)) => {
+                        //     cli::print_error("metadata", msg)?;
+                        // }
+                        // Err(databroker_grpc::Error::Function(msg)) => {
+                        //     cli::print_resp_err_fmt("metadata", format_args!("Error {msg:?}"))?;
+                        // }
+                        Err(err) => cli::print_error("metadata", err.to_string())?,
                     }
                 }
                 Err(err) => {
@@ -212,15 +209,16 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                         println!("{}: {}", name, DisplayDatapoint(datapoint),);
                                     }
                                 }
-                                Err(kuksa_common::ClientError::Status(err)) => {
-                                    cli::print_resp_err(cmd, &err)?;
-                                }
-                                Err(kuksa_common::ClientError::Connection(msg)) => {
-                                    cli::print_error(cmd, msg)?;
-                                }
-                                Err(kuksa_common::ClientError::Function(msg)) => {
-                                    cli::print_resp_err_fmt(cmd, format_args!("Error {msg:?}"))?;
-                                }
+                                // Err(databroker_grpc::Error::Status(err)) => {
+                                //     cli::print_resp_err(cmd, &err)?;
+                                // }
+                                // Err(databroker_grpc::Error::Connection(msg)) => {
+                                //     cli::print_error(cmd, msg)?;
+                                // }
+                                // Err(databroker_grpc::Error::Function(msg)) => {
+                                //     cli::print_resp_err_fmt(cmd, format_args!("Error {msg:?}"))?;
+                                // }
+                                Err(err) => cli::print_error(cmd, err.to_string())?,
                             }
                         }
                         "token" => {
@@ -231,7 +229,7 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 continue;
                             }
 
-                            match client.basic_client.set_access_token(args) {
+                            match client.set_access_token(args) {
                                 Ok(()) => {
                                     cli::print_info("Access token set.")?;
                                     match client.get_metadata(vec![]).await {
@@ -241,18 +239,19 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                             ));
                                             properties = metadata;
                                         }
-                                        Err(kuksa_common::ClientError::Status(status)) => {
-                                            cli::print_resp_err("metadata", &status)?;
-                                        }
-                                        Err(kuksa_common::ClientError::Connection(msg)) => {
-                                            cli::print_error("metadata", msg)?;
-                                        }
-                                        Err(kuksa_common::ClientError::Function(msg)) => {
-                                            cli::print_resp_err_fmt(
-                                                "metadata",
-                                                format_args!("Error {msg:?}"),
-                                            )?;
-                                        }
+                                        // Err(databroker_grpc::Error::Status(status)) => {
+                                        //     cli::print_resp_err("metadata", &status)?;
+                                        // }
+                                        // Err(databroker_grpc::Error::Connection(msg)) => {
+                                        //     cli::print_error("metadata", msg)?;
+                                        // }
+                                        // Err(databroker_grpc::Error::Function(msg)) => {
+                                        //     cli::print_resp_err_fmt(
+                                        //         "metadata",
+                                        //         format_args!("Error {msg:?}"),
+                                        //     )?;
+                                        // }
+                                        Err(err) => cli::print_error(cmd, err.to_string())?,
                                     }
                                 }
                                 Err(err) => {
@@ -270,7 +269,7 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                             let token_filename = args.trim();
                             match std::fs::read_to_string(token_filename) {
-                                Ok(token) => match client.basic_client.set_access_token(token) {
+                                Ok(token) => match client.set_access_token(token) {
                                     Ok(()) => {
                                         cli::print_info("Access token set.")?;
                                         match client.get_metadata(vec![]).await {
@@ -280,18 +279,19 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                                 ));
                                                 properties = metadata;
                                             }
-                                            Err(kuksa_common::ClientError::Status(status)) => {
-                                                cli::print_resp_err("metadata", &status)?;
-                                            }
-                                            Err(kuksa_common::ClientError::Connection(msg)) => {
-                                                cli::print_error("metadata", msg)?;
-                                            }
-                                            Err(kuksa_common::ClientError::Function(msg)) => {
-                                                cli::print_resp_err_fmt(
-                                                    cmd,
-                                                    format_args!("Error {msg:?}"),
-                                                )?;
-                                            }
+                                            // Err(databroker_grpc::Error::Status(status)) => {
+                                            //     cli::print_resp_err("metadata", &status)?;
+                                            // }
+                                            // Err(databroker_grpc::Error::Connection(msg)) => {
+                                            //     cli::print_error("metadata", msg)?;
+                                            // }
+                                            // Err(databroker_grpc::Error::Function(msg)) => {
+                                            //     cli::print_resp_err_fmt(
+                                            //         cmd,
+                                            //         format_args!("Error {msg:?}"),
+                                            //     )?;
+                                            // }
+                                            Err(err) => cli::print_error(cmd, err.to_string())?,
                                         }
                                     }
                                     Err(err) => {
@@ -389,18 +389,19 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                             }
                                         }
                                     }
-                                    Err(kuksa_common::ClientError::Status(status)) => {
-                                        cli::print_resp_err(cmd, &status)?
-                                    }
-                                    Err(kuksa_common::ClientError::Connection(msg)) => {
-                                        cli::print_error(cmd, msg)?
-                                    }
-                                    Err(kuksa_common::ClientError::Function(msg)) => {
-                                        cli::print_resp_err_fmt(
-                                            cmd,
-                                            format_args!("Error {msg:?}"),
-                                        )?;
-                                    }
+                                    // Err(databroker_grpc::Error::Status(status)) => {
+                                    //     cli::print_resp_err(cmd, &status)?
+                                    // }
+                                    // Err(databroker_grpc::Error::Connection(msg)) => {
+                                    //     cli::print_error(cmd, msg)?
+                                    // }
+                                    // Err(databroker_grpc::Error::Function(msg)) => {
+                                    //     cli::print_resp_err_fmt(
+                                    //         cmd,
+                                    //         format_args!("Error {msg:?}"),
+                                    //     )?;
+                                    // }
+                                    Err(err) => cli::print_error(cmd, err.to_string())?,
                                 }
                             }
                         }
@@ -479,17 +480,20 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                             }
                                         }
                                     }
-                                    Err(kuksa_common::ClientError::Status(status)) => {
-                                        cli::print_resp_err(cmd, &status)?
-                                    }
-                                    Err(kuksa_common::ClientError::Connection(msg)) => {
-                                        cli::print_error(cmd, msg)?
-                                    }
-                                    Err(kuksa_common::ClientError::Function(msg)) => {
-                                        cli::print_resp_err_fmt(
-                                            cmd,
-                                            format_args!("Error {msg:?}"),
-                                        )?;
+                                    // Err(databroker_grpc::Error::Status(status)) => {
+                                    //     cli::print_resp_err(cmd, &status)?
+                                    // }
+                                    // Err(databroker_grpc::Error::Connection(msg)) => {
+                                    //     cli::print_error(cmd, msg)?
+                                    // }
+                                    // Err(databroker_grpc::Error::Function(msg)) => {
+                                    //     cli::print_resp_err_fmt(
+                                    //         cmd,
+                                    //         format_args!("Error {msg:?}"),
+                                    //     )?;
+                                    // }
+                                    Err(err) => {
+                                        cli::print_error(cmd, err.to_string())?;
                                     }
                                 }
                             }
@@ -584,26 +588,29 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                             )?;
                                     subscription_nbr += 1;
                                 }
-                                Err(kuksa_common::ClientError::Status(status)) => {
+                                Err(databroker_grpc::Error::Status(status)) => {
                                     cli::print_resp_err(cmd, &status)?
                                 }
-                                Err(kuksa_common::ClientError::Connection(msg)) => {
-                                    cli::print_error(cmd, msg)?
-                                }
-                                Err(kuksa_common::ClientError::Function(msg)) => {
-                                    cli::print_resp_err_fmt(cmd, format_args!("Error {msg:?}"))?
+                                // Err(databroker_grpc::Error::Connection(msg)) => {
+                                //     cli::print_error(cmd, msg)?
+                                // }
+                                // Err(databroker_grpc::Error::Function(msg)) => {
+                                //     cli::print_resp_err_fmt(cmd, format_args!("Error {msg:?}"))?
+                                // }
+                                Err(err) => {
+                                    cli::print_error(cmd, err.to_string())?;
                                 }
                             }
                         }
                         "connect" => {
                             interface.add_history_unique(line.clone());
-                            if !client.basic_client.is_connected() || !args.is_empty() {
+                            if !client.is_connected() || !args.is_empty() {
                                 if args.is_empty() {
-                                    match client.basic_client.try_connect().await {
+                                    match client.try_connect().await {
                                         Ok(()) => {
                                             cli::print_info(format!(
                                                 "[{cmd}] Successfully connected to {}",
-                                                client.basic_client.get_uri()
+                                                client.get_uri()
                                             ))?;
                                         }
                                         Err(err) => {
@@ -613,15 +620,11 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     match cli::to_uri(args) {
                                         Ok(valid_uri) => {
-                                            match client
-                                                .basic_client
-                                                .try_connect_to(valid_uri)
-                                                .await
-                                            {
+                                            match client.try_connect_to(valid_uri).await {
                                                 Ok(()) => {
                                                     cli::print_info(format!(
                                                         "[{cmd}] Successfully connected to {}",
-                                                        client.basic_client.get_uri()
+                                                        client.get_uri()
                                                     ))?;
                                                 }
                                                 Err(err) => {
@@ -637,7 +640,7 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     }
                                 };
-                                if client.basic_client.is_connected() {
+                                if client.is_connected() {
                                     match client.get_metadata(vec![]).await {
                                         Ok(metadata) => {
                                             interface.set_completer(Arc::new(
@@ -645,18 +648,19 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                             ));
                                             properties = metadata;
                                         }
-                                        Err(kuksa_common::ClientError::Status(status)) => {
-                                            cli::print_resp_err("metadata", &status)?;
-                                        }
-                                        Err(kuksa_common::ClientError::Connection(msg)) => {
-                                            cli::print_error("metadata", msg)?;
-                                        }
-                                        Err(kuksa_common::ClientError::Function(msg)) => {
-                                            cli::print_resp_err_fmt(
-                                                cmd,
-                                                format_args!("Error {msg:?}"),
-                                            )?;
-                                        }
+                                        // Err(kuksa_grpc::Error::Status(status)) => {
+                                        //     cli::print_resp_err("metadata", &status)?;
+                                        // }
+                                        // Err(kuksa_grpc::Error::Connection(msg)) => {
+                                        //     cli::print_error("metadata", msg)?;
+                                        // }
+                                        // Err(kuksa_grpc::Error::Function(msg)) => {
+                                        //     cli::print_resp_err_fmt(
+                                        //         cmd,
+                                        //         format_args!("Error {msg:?}"),
+                                        //     )?;
+                                        // }
+                                        Err(err) => cli::print_error(cmd, err.to_string())?,
                                     }
                                 }
                             };
@@ -675,18 +679,19 @@ pub async fn sdv_main(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                     )));
                                     cli::print_resp_ok(cmd)?;
                                 }
-                                Err(kuksa_common::ClientError::Status(status)) => {
-                                    cli::print_resp_err(cmd, &status)?;
-                                    continue;
-                                }
-                                Err(kuksa_common::ClientError::Connection(msg)) => {
-                                    cli::print_error(cmd, msg)?;
-                                    continue;
-                                }
-                                Err(kuksa_common::ClientError::Function(msg)) => {
-                                    cli::print_resp_err_fmt(cmd, format_args!("Error {msg:?}"))?;
-                                    continue;
-                                }
+                                // Err(databroker_grpc::Error::Status(status)) => {
+                                //     cli::print_resp_err(cmd, &status)?;
+                                //     continue;
+                                // }
+                                // Err(databroker_grpc::Error::Connection(msg)) => {
+                                //     cli::print_error(cmd, msg)?;
+                                //     continue;
+                                // }
+                                // Err(databroker_grpc::Error::Function(msg)) => {
+                                //     cli::print_resp_err_fmt(cmd, format_args!("Error {msg:?}"))?;
+                                //     continue;
+                                // }
+                                Err(err) => cli::print_error(cmd, err.to_string())?,
                             }
                             let mut filtered_metadata = Vec::new();
                             if paths.is_empty() {

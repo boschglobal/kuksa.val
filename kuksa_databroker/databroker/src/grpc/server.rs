@@ -20,13 +20,13 @@ use tonic::transport::Server;
 use tonic::transport::ServerTlsConfig;
 use tracing::{debug, info};
 
-use databroker_proto::{kuksa, sdv};
-
 use crate::{
     authorization::Authorization,
     broker,
     permissions::{self, Permissions},
 };
+use databroker_proto::sdv;
+use kuksa_proto as kuksa;
 
 #[cfg(feature = "tls")]
 pub enum ServerTLS {
@@ -160,7 +160,7 @@ where
                 authorization.clone(),
             ),
         )
-        .add_service(kuksa::val::v1::val_server::ValServer::with_interceptor(
+        .add_service(kuksa::v1::val_server::ValServer::with_interceptor(
             broker.clone(),
             authorization,
         ))

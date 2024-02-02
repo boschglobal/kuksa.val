@@ -11,7 +11,7 @@
 * SPDX-License-Identifier: Apache-2.0
 ********************************************************************************/
 
-use databroker_proto::kuksa::val::v1 as proto;
+use kuksa_proto::v1 as proto;
 
 use crate::broker;
 

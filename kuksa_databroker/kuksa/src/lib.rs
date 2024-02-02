@@ -13,32 +13,74 @@
 
 use http::Uri;
 use std::collections::HashMap;
+use tokio_stream::wrappers::BroadcastStream;
 
-use databroker_proto::kuksa::val::{self as proto, v1::DataEntry};
+use kuksa_proto::{self as proto, v1::DataEntry};
 
-use kuksa_common::{Client, ClientError};
+use kuksa_grpc::{Client as GrpcClient, Error as GrpcError};
+
+pub use kuksa_grpc::{ConnectionState, TokenError};
 
 #[derive(Debug)]
-pub struct KuksaClient {
-    pub basic_client: Client,
+pub struct Client {
+    grpc_client: GrpcClient,
 }
 
-impl KuksaClient {
+#[derive(thiserror::Error, Clone, Debug)]
+pub enum Error {
+    #[error("connection failed: {0}")]
+    Connection(String),
+    #[error("failed with GRPC status code: {0}")]
+    Status(tonic::Status),
+    #[error("function returned error")]
+    Function(Vec<proto::v1::Error>),
+}
+
+impl Client {
     pub fn new(uri: Uri) -> Self {
-        KuksaClient {
-            basic_client: Client::new(uri),
+        Client {
+            grpc_client: GrpcClient::new(uri),
         }
     }
 
-    async fn set(&mut self, entry: DataEntry, _fields: Vec<i32>) -> Result<(), ClientError> {
+    pub fn set_access_token(&mut self, token: impl AsRef<str>) -> Result<(), TokenError> {
+        self.grpc_client.set_access_token(token)
+    }
+
+    #[cfg(feature = "tls")]
+    pub fn set_tls_config(&mut self, tls_config: tonic::transport::ClientTlsConfig) {
+        self.grpc_client.set_tls_config(tls_config)
+    }
+
+    pub fn subscribe_to_connection_state(&mut self) -> BroadcastStream<ConnectionState> {
+        self.grpc_client.subscribe_to_connection_state()
+    }
+
+    pub async fn try_connect(&mut self) -> Result<(), Error> {
+        Ok(self.grpc_client.try_connect().await?)
+    }
+
+    pub fn get_uri(&self) -> String {
+        self.grpc_client.get_uri()
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.grpc_client.is_connected()
+    }
+
+    pub async fn try_connect_to(&mut self, uri: tonic::transport::Uri) -> Result<(), Error> {
+        Ok(self.grpc_client.try_connect_to(uri).await?)
+    }
+
+    pub async fn set(&mut self, entry: DataEntry, fields: Vec<i32>) -> Result<(), Error> {
         let mut client = proto::v1::val_client::ValClient::with_interceptor(
-            self.basic_client.get_channel().await?.clone(),
-            self.basic_client.get_auth_interceptor(),
+            self.grpc_client.get_channel().await?.clone(),
+            self.grpc_client.get_auth_interceptor(),
         );
         let set_request = proto::v1::SetRequest {
             updates: vec![proto::v1::EntryUpdate {
                 entry: Some(entry),
-                fields: _fields,
+                fields: fields,
             }],
         };
         match client.set(set_request).await {
@@ -56,22 +98,22 @@ impl KuksaClient {
                 if errors.is_empty() {
                     Ok(())
                 } else {
-                    Err(ClientError::Function(errors))
+                    Err(Error::Function(errors))
                 }
             }
-            Err(err) => Err(ClientError::Status(err)),
+            Err(err) => Err(Error::Status(err)),
         }
     }
 
-    async fn get(
+    pub async fn get(
         &mut self,
         path: &str,
         view: proto::v1::View,
         _fields: Vec<i32>,
-    ) -> Result<Vec<DataEntry>, ClientError> {
+    ) -> Result<Vec<DataEntry>, Error> {
         let mut client = proto::v1::val_client::ValClient::with_interceptor(
-            self.basic_client.get_channel().await?.clone(),
-            self.basic_client.get_auth_interceptor(),
+            self.grpc_client.get_channel().await?.clone(),
+            self.grpc_client.get_auth_interceptor(),
         );
 
         let get_request = proto::v1::GetRequest {
@@ -95,17 +137,17 @@ impl KuksaClient {
                     }
                 }
                 if !errors.is_empty() {
-                    Err(ClientError::Function(errors))
+                    Err(Error::Function(errors))
                 } else {
                     // since there is only one DataEntry in the vector return only the according DataEntry
                     Ok(message.entries.clone())
                 }
             }
-            Err(err) => Err(ClientError::Status(err)),
+            Err(err) => Err(Error::Status(err)),
         }
     }
 
-    pub async fn get_metadata(&mut self, paths: Vec<&str>) -> Result<Vec<DataEntry>, ClientError> {
+    pub async fn get_metadata(&mut self, paths: Vec<&str>) -> Result<Vec<DataEntry>, Error> {
         let mut metadata_result = Vec::new();
 
         for path in paths {
@@ -128,7 +170,7 @@ impl KuksaClient {
     pub async fn get_current_values(
         &mut self,
         paths: Vec<String>,
-    ) -> Result<Vec<DataEntry>, ClientError> {
+    ) -> Result<Vec<DataEntry>, Error> {
         let mut get_result = Vec::new();
 
         for path in paths {
@@ -151,10 +193,7 @@ impl KuksaClient {
         Ok(get_result)
     }
 
-    pub async fn get_target_values(
-        &mut self,
-        paths: Vec<&str>,
-    ) -> Result<Vec<DataEntry>, ClientError> {
+    pub async fn get_target_values(&mut self, paths: Vec<&str>) -> Result<Vec<DataEntry>, Error> {
         let mut get_result = Vec::new();
 
         for path in paths {
@@ -180,7 +219,7 @@ impl KuksaClient {
     pub async fn set_current_values(
         &mut self,
         datapoints: HashMap<String, proto::v1::Datapoint>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<(), Error> {
         for (path, datapoint) in datapoints {
             match self
                 .set(
@@ -210,7 +249,7 @@ impl KuksaClient {
     pub async fn set_target_values(
         &mut self,
         datapoints: HashMap<String, proto::v1::Datapoint>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<(), Error> {
         for (path, datapoint) in datapoints {
             match self
                 .set(
@@ -240,7 +279,7 @@ impl KuksaClient {
     pub async fn set_metadata(
         &mut self,
         metadatas: HashMap<String, proto::v1::Metadata>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<(), Error> {
         for (path, metadata) in metadatas {
             match self
                 .set(
@@ -270,10 +309,10 @@ impl KuksaClient {
     pub async fn subscribe_current_values(
         &mut self,
         paths: Vec<&str>,
-    ) -> Result<tonic::Streaming<proto::v1::SubscribeResponse>, ClientError> {
+    ) -> Result<tonic::Streaming<proto::v1::SubscribeResponse>, Error> {
         let mut client = proto::v1::val_client::ValClient::with_interceptor(
-            self.basic_client.get_channel().await?.clone(),
-            self.basic_client.get_auth_interceptor(),
+            self.grpc_client.get_channel().await?.clone(),
+            self.grpc_client.get_auth_interceptor(),
         );
 
         let mut entries = Vec::new();
@@ -292,25 +331,24 @@ impl KuksaClient {
 
         match client.subscribe(req).await {
             Ok(response) => Ok(response.into_inner()),
-            Err(err) => Err(ClientError::Status(err)),
+            Err(err) => Err(Error::Status(err)),
         }
     }
 
-    //masking subscribe curent values with subscribe due to plugability
     pub async fn subscribe(
         &mut self,
         paths: Vec<&str>,
-    ) -> Result<tonic::Streaming<proto::v1::SubscribeResponse>, ClientError> {
+    ) -> Result<tonic::Streaming<proto::v1::SubscribeResponse>, Error> {
         self.subscribe_current_values(paths).await
     }
 
     pub async fn subscribe_target_values(
         &mut self,
         paths: Vec<&str>,
-    ) -> Result<tonic::Streaming<proto::v1::SubscribeResponse>, ClientError> {
+    ) -> Result<tonic::Streaming<proto::v1::SubscribeResponse>, Error> {
         let mut client = proto::v1::val_client::ValClient::with_interceptor(
-            self.basic_client.get_channel().await?.clone(),
-            self.basic_client.get_auth_interceptor(),
+            self.grpc_client.get_channel().await?.clone(),
+            self.grpc_client.get_auth_interceptor(),
         );
         let mut entries = Vec::new();
         for path in paths {
@@ -325,17 +363,17 @@ impl KuksaClient {
 
         match client.subscribe(req).await {
             Ok(response) => Ok(response.into_inner()),
-            Err(err) => Err(ClientError::Status(err)),
+            Err(err) => Err(Error::Status(err)),
         }
     }
 
     pub async fn subscribe_metadata(
         &mut self,
         paths: Vec<String>,
-    ) -> Result<tonic::Streaming<proto::v1::SubscribeResponse>, ClientError> {
+    ) -> Result<tonic::Streaming<proto::v1::SubscribeResponse>, Error> {
         let mut client = proto::v1::val_client::ValClient::with_interceptor(
-            self.basic_client.get_channel().await?.clone(),
-            self.basic_client.get_auth_interceptor(),
+            self.grpc_client.get_channel().await?.clone(),
+            self.grpc_client.get_auth_interceptor(),
         );
         let mut entries = Vec::new();
         for path in paths {
@@ -350,7 +388,16 @@ impl KuksaClient {
 
         match client.subscribe(req).await {
             Ok(response) => Ok(response.into_inner()),
-            Err(err) => Err(ClientError::Status(err)),
+            Err(err) => Err(Error::Status(err)),
+        }
+    }
+}
+
+impl From<GrpcError> for Error {
+    fn from(err: GrpcError) -> Self {
+        match err {
+            GrpcError::Connection(msg) => Error::Connection(msg),
+            GrpcError::Status(status) => Error::Status(status),
         }
     }
 }

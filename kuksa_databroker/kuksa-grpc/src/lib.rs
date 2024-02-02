@@ -13,7 +13,6 @@
 
 use std::convert::TryFrom;
 
-use databroker_proto::kuksa::val::v1::Error;
 use http::Uri;
 use tokio_stream::wrappers::BroadcastStream;
 use tonic::transport::Channel;
@@ -35,48 +34,14 @@ pub enum ConnectionState {
 }
 
 #[derive(Debug, Clone)]
-pub enum ClientError {
+pub enum Error {
     Connection(String),
     Status(tonic::Status),
-    Function(Vec<Error>),
-}
-
-impl std::error::Error for ClientError {}
-impl std::fmt::Display for ClientError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ClientError::Connection(con) => f.pad(con),
-            ClientError::Status(status) => f.pad(&format!("{status}")),
-            ClientError::Function(err) => {
-                let formatted_result: String = err
-                    .iter()
-                    .map(|element| {
-                        format!(
-                            "code: {}, message: {}, reason: {}",
-                            element.code, element.message, element.reason
-                        )
-                    })
-                    .collect::<Vec<String>>()
-                    .join(", "); // Join the elements with a comma and space
-
-                f.pad(&formatted_result)
-            }
-        }
-    }
 }
 
 #[derive(Debug)]
 pub enum TokenError {
     MalformedTokenError(String),
-}
-
-impl std::error::Error for TokenError {}
-impl std::fmt::Display for TokenError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TokenError::MalformedTokenError(msg) => f.pad(msg),
-        }
-    }
 }
 
 pub fn to_uri(uri: impl AsRef<str>) -> Result<Uri, String> {
@@ -149,14 +114,14 @@ impl Client {
         match &self.connection_state_subs {
             Some(stream) => BroadcastStream::new(stream.subscribe()),
             None => {
-                let (tx, rx1) = tokio::sync::broadcast::channel(1);
+                let (tx, rx) = tokio::sync::broadcast::channel(1);
                 self.connection_state_subs = Some(tx);
-                BroadcastStream::new(rx1)
+                BroadcastStream::new(rx)
             }
         }
     }
 
-    async fn try_create_channel(&mut self) -> Result<&Channel, ClientError> {
+    async fn try_create_channel(&mut self) -> Result<&Channel, Error> {
         #[cfg(feature = "tls")]
         let mut builder = tonic::transport::Channel::builder(self.uri.clone());
         #[cfg(not(feature = "tls"))]
@@ -169,9 +134,7 @@ impl Client {
                     builder = new_builder;
                 }
                 Err(err) => {
-                    return Err(ClientError::Connection(format!(
-                        "Failed to configure TLS: {err}"
-                    )));
+                    return Err(Error::Connection(format!("Failed to configure TLS: {err}")));
                 }
             }
         }
@@ -180,7 +143,7 @@ impl Client {
             Ok(channel) => {
                 if let Some(subs) = &self.connection_state_subs {
                     subs.send(ConnectionState::Connected).map_err(|err| {
-                        ClientError::Connection(format!(
+                        Error::Connection(format!(
                             "Failed to notify connection state change: {err}"
                         ))
                     })?;
@@ -192,7 +155,7 @@ impl Client {
                 if let Some(subs) = &self.connection_state_subs {
                     subs.send(ConnectionState::Disconnected).unwrap_or_default();
                 }
-                Err(ClientError::Connection(format!(
+                Err(Error::Connection(format!(
                     "Failed to connect to {}: {}",
                     self.uri, err
                 )))
@@ -200,30 +163,26 @@ impl Client {
         }
     }
 
-    pub async fn try_connect(&mut self) -> Result<(), ClientError> {
+    pub async fn try_connect(&mut self) -> Result<(), Error> {
         self.try_create_channel().await?;
         Ok(())
     }
 
-    pub async fn try_connect_to(&mut self, uri: tonic::transport::Uri) -> Result<(), ClientError> {
+    pub async fn try_connect_to(&mut self, uri: tonic::transport::Uri) -> Result<(), Error> {
         self.uri = uri;
         self.try_create_channel().await?;
         Ok(())
     }
 
-    pub async fn get_channel(&mut self) -> Result<&Channel, ClientError> {
-        if self.channel.is_none() {
-            self.try_create_channel().await
-        } else {
-            match &self.channel {
-                Some(channel) => Ok(channel),
-                None => unreachable!(),
-            }
+    pub async fn get_channel(&mut self) -> Result<&Channel, Error> {
+        match self.channel {
+            None => self.try_create_channel().await,
+            Some(ref channel) => Ok(channel),
         }
     }
 
     pub fn get_auth_interceptor(
-        &mut self,
+        &self,
     ) -> impl FnMut(tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> + '_ {
         move |mut req: tonic::Request<()>| {
             if let Some(token) = &self.token {
@@ -231,6 +190,25 @@ impl Client {
                 req.metadata_mut().insert("authorization", token.clone());
             }
             Ok(req)
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Connection(con) => f.pad(con),
+            Error::Status(status) => f.pad(&format!("{status}")),
+        }
+    }
+}
+
+impl std::error::Error for TokenError {}
+impl std::fmt::Display for TokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenError::MalformedTokenError(msg) => f.pad(msg),
         }
     }
 }

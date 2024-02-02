@@ -12,15 +12,16 @@
 #*******************************************************************************/
 
 [package]
-name = "kuksa"
+name = "databroker-grpc"
 version = "0.1.0"
 authors = ["Eclipse KUKSA Project"]
 edition = "2018"
 license = "Apache-2.0"
 
 [dependencies]
-kuksa-common = { path = "../common"}
+kuksa-grpc = { workspace = true }
 databroker-proto = { workspace = true }
+thiserror = { workspace = true }
 tonic = { workspace = true, features = ["transport", "channel"] }
 tokio = { workspace = true, features = [
     "macros",
@@ -29,7 +30,7 @@ tokio-stream = { workspace = true, features = ["sync"] }
 http = "0.2.8"
 
 [lib]
-name = "kuksa"
+name = "databroker_grpc"
 crate-type = ["lib"]
 path = "src/lib.rs"
 

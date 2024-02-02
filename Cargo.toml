@@ -15,8 +15,12 @@
 
 members = [
     "kuksa_databroker/databroker",
-    "kuksa_databroker/databroker-proto",
     "kuksa_databroker/databroker-cli",
+    "kuksa_databroker/databroker-grpc",
+    "kuksa_databroker/databroker-proto",
+    "kuksa_databroker/kuksa",
+    "kuksa_databroker/kuksa-grpc",
+    "kuksa_databroker/kuksa-proto",
 ]
 
 exclude = [
@@ -25,11 +29,16 @@ exclude = [
 
 [workspace.dependencies]
 clap = { version = "4.2", default-features = false }
+databroker-grpc = { path = "kuksa_databroker/databroker-grpc" }
 databroker-proto = { path = "kuksa_databroker/databroker-proto" }
+kuksa = { path = "kuksa_databroker/kuksa" }
+kuksa-grpc = { path = "kuksa_databroker/kuksa-grpc" }
+kuksa-proto = { path = "kuksa_databroker/kuksa-proto" }
 # prost has no features
 prost = "0.11"
 # prost-types has no features
 prost-types = "0.11"
+thiserror = "1.0.47"
 # tokio does not enable features by default
 tokio = "1.17.0"
 # tokio-stream has no features

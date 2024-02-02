@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::pin::Pin;
 
-use databroker_proto::kuksa::val::v1 as proto;
-use databroker_proto::kuksa::val::v1::DataEntryError;
+use kuksa_proto::v1 as proto;
+use kuksa_proto::v1::DataEntryError;
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
 use tracing::debug;

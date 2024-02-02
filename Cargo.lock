@@ -599,7 +599,8 @@ dependencies = [
  "jemallocator",
  "jsonwebtoken",
  "kuksa",
- "kuksa-common",
+ "kuksa-grpc",
+ "kuksa-proto",
  "lazy_static",
  "prost",
  "prost-types",
@@ -623,15 +624,29 @@ version = "0.4.1"
 dependencies = [
  "ansi_term",
  "clap",
+ "databroker-grpc",
  "databroker-proto",
  "http",
  "kuksa",
- "kuksa-common",
- "kuksa-sdv",
+ "kuksa-grpc",
+ "kuksa-proto",
  "linefeed",
  "prost",
  "prost-types",
  "regex",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+]
+
+[[package]]
+name = "databroker-grpc"
+version = "0.1.0"
+dependencies = [
+ "databroker-proto",
+ "http",
+ "kuksa-grpc",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -1758,19 +1773,19 @@ dependencies = [
 name = "kuksa"
 version = "0.1.0"
 dependencies = [
- "databroker-proto",
  "http",
- "kuksa-common",
+ "kuksa-grpc",
+ "kuksa-proto",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tonic",
 ]
 
 [[package]]
-name = "kuksa-common"
+name = "kuksa-grpc"
 version = "0.1.0"
 dependencies = [
- "databroker-proto",
  "http",
  "tokio",
  "tokio-stream",
@@ -1778,15 +1793,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "kuksa-sdv"
-version = "0.1.0"
+name = "kuksa-proto"
+version = "0.4.1"
 dependencies = [
- "databroker-proto",
- "http",
- "kuksa-common",
- "tokio",
- "tokio-stream",
+ "prost",
+ "prost-types",
+ "protobuf-src",
  "tonic",
+ "tonic-build",
 ]
 
 [[package]]

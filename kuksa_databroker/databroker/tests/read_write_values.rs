@@ -16,7 +16,7 @@ use std::{collections::HashMap, future, time::SystemTime, vec};
 
 use cucumber::{cli, gherkin::Step, given, then, when, writer, World as _};
 use databroker::broker;
-use databroker_proto::kuksa::val::v1::{datapoint::Value, DataType, Datapoint};
+use kuksa_proto::v1::{datapoint::Value, DataType, Datapoint};
 use tracing::debug;
 use world::{DataBrokerWorld, ValueType};
 
@@ -105,7 +105,7 @@ async fn authorize_client(w: &mut DataBrokerWorld, scope: String) {
     let token = w.create_token(scope);
     w.broker_client
         .as_mut()
-        .and_then(|client| match client.basic_client.set_access_token(token) {
+        .and_then(|client| match client.set_access_token(token) {
             Ok(()) => Some(client),
             Err(e) => {
                 println!("Error: {e}");

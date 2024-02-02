@@ -22,8 +22,7 @@ use std::{
 use chrono::Utc;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
-use databroker_proto::kuksa::val::v1::{datapoint::Value, DataEntry};
-use kuksa_common::ClientError;
+use kuksa_proto::v1::{datapoint::Value, DataEntry};
 
 use databroker::{
     broker,
@@ -139,8 +138,8 @@ struct DataBrokerState {
 #[world(init = Self::new)]
 pub struct DataBrokerWorld {
     pub current_data_entries: Option<Vec<DataEntry>>,
-    pub current_client_error: Option<ClientError>,
-    pub broker_client: Option<kuksa::KuksaClient>,
+    pub current_client_error: Option<kuksa::Error>,
+    pub broker_client: Option<kuksa::Client>,
     data_broker_state: Arc<Mutex<DataBrokerState>>,
 }
 
@@ -268,8 +267,8 @@ impl DataBrokerWorld {
 
         let data_broker_url = format!("http://{}:{}", addr.ip(), addr.port());
 
-        self.broker_client = match kuksa_common::to_uri(data_broker_url.clone()) {
-            Ok(uri) => Some(kuksa::KuksaClient::new(uri)),
+        self.broker_client = match kuksa_grpc::to_uri(data_broker_url.clone()) {
+            Ok(uri) => Some(kuksa::Client::new(uri)),
             Err(e) => {
                 println!("Error connecting to {data_broker_url}: {e}");
                 None
@@ -278,9 +277,7 @@ impl DataBrokerWorld {
 
         #[cfg(feature = "tls")]
         if let Some(client) = self.broker_client.as_mut() {
-            client
-                .basic_client
-                .set_tls_config(CERTS.client_tls_config());
+            client.set_tls_config(CERTS.client_tls_config());
         }
     }
 
@@ -318,11 +315,11 @@ impl DataBrokerWorld {
     /// https://github.com/grpc/grpc/blob/master/doc/statuscodes.md#status-codes-and-their-use-in-grpc
     pub fn assert_status_has_code(&self, expected_status_code: i32) {
         match &self.current_client_error {
-            Some(ClientError::Connection(_)) => panic!("Connection error shall not occur"),
-            Some(ClientError::Function(_)) => {
+            Some(kuksa::Error::Connection(_)) => panic!("Connection error shall not occur"),
+            Some(kuksa::Error::Function(_)) => {
                 panic!("Fucntion has an error that shall not occur")
             }
-            Some(ClientError::Status(status)) => {
+            Some(kuksa::Error::Status(status)) => {
                 assert_eq!(status.code(), Code::from_i32(expected_status_code))
             }
             None => panic!("No error, but an errror is expected"),
@@ -334,15 +331,15 @@ impl DataBrokerWorld {
 
         if let Some(client_error) = self.current_client_error.clone() {
             match client_error {
-                ClientError::Connection(_) => panic!("response contains connection error"),
-                ClientError::Function(e) => {
+                kuksa::Error::Connection(_) => panic!("response contains connection error"),
+                kuksa::Error::Function(e) => {
                     for element in e {
                         if !code.contains(&element.code) {
                             code.push(element.code)
                         }
                     }
                 }
-                ClientError::Status(_) => panic!("response contains channel error"),
+                kuksa::Error::Status(_) => panic!("response contains channel error"),
             }
 
             assert!(
@@ -359,13 +356,13 @@ impl DataBrokerWorld {
     pub fn assert_set_succeeded(&self) {
         if let Some(error) = self.current_client_error.clone() {
             match error {
-                ClientError::Connection(e) => {
+                kuksa::Error::Connection(e) => {
                     panic!("No connection error {:?} should occcur", e)
                 }
-                ClientError::Function(e) => {
+                kuksa::Error::Function(e) => {
                     panic!("No function error {:?} should occur", e)
                 }
-                ClientError::Status(status) => {
+                kuksa::Error::Status(status) => {
                     panic!("No status error {:?} should occur", status)
                 }
             }
